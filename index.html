@@ -33,6 +33,10 @@ h1,h2,h3{margin:0; text-wrap:balance;}
   padding-block:14px 12px;
   padding-left:max(16px, env(safe-area-inset-left, 0px));
   padding-right:max(16px, env(safe-area-inset-right, 0px));}
+.aparelho{border:1px solid var(--linha);border-radius:12px;padding:10px 12px;margin-bottom:8px;background:#fff}
+.ap-topo{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.ap-nome{font-weight:700}.ap-nome em{font-weight:400;color:var(--fraco);font-style:normal}
+.ap-sit{color:#fff;font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:20px;padding:3px 9px;flex:none}
 .logo-topo{height:30px;width:30px;object-fit:contain;border-radius:7px;background:#fff;vertical-align:middle;margin-right:7px;padding:2px}
 .logo-ajuste{display:flex;align-items:center;gap:12px;margin-top:10px}
 .logo-ajuste .logo-prev{width:64px;height:64px;border-radius:12px;border:1.5px dashed var(--linha);background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none;font-size:11px;color:var(--fraco);text-align:center}
@@ -3517,11 +3521,13 @@ function assinarNuvem2(){
     S.bloqueado = !!(snap.exists && snap.data().bloqueado);
     desenhar();
   }, ()=>{}));
+  assinarAparelhos();
   S.assinaturas.push(S.db.doc("cfg/geral").onSnapshot({includeMetadataChanges:true}, (snap)=>{
     if(!snap.metadata.fromCache && S.nuvem!=="erro") S.nuvem = "ok";
     if(!snap.exists && snap.metadata.fromCache && S.cfg && S.cfg.ev){ pintarSinal(); return; }
     S.cfg = snap.exists ? snap.data() : {ev:""};
-    if(!snap.metadata.fromCache) S.nuvem = "ok";
+    if(!snap.metadata.fromCache){ S.nuvem = "ok";
+      if(!S.cfgPronto){ S.cfgPronto = true; if(S.registrarDepois){ S.registrarDepois = false; registrarAparelho(true); } } }
     if((S.cfg.ev||"") !== S.evId) entrarNoEvento(S.cfg.ev||"");
     pintarSinal(); desenhar();
   }, falha));
@@ -3537,6 +3543,104 @@ function assinarNuvem2(){
   }, falha));
   setTimeout(()=>{ if(S.nuvem==="ligando"){ S.nuvem="lenta"; pintarSinal(); } }, 10000);
 }
+/* ═══════════ aparelhos (gestão pelo responsável) ═══════════ */
+function modeloAparelho(){
+  const u = navigator.userAgent||"";
+  if(/iPhone/.test(u)) return "iPhone";
+  if(/iPad/.test(u) || (/Macintosh/.test(u) && navigator.maxTouchPoints>1)) return "iPad";
+  if(/Android/.test(u)){ const m = u.match(/Android[^;]*;\s*([^;)]+?)(?:\s+Build|\))/); return m && m[1] && !/^wv$|^K$/.test(m[1].trim()) ? m[1].trim() : "Android"; }
+  if(/Windows/.test(u)) return "Computador (Windows)";
+  if(/Macintosh/.test(u)) return "Computador (Mac)";
+  return "Outro aparelho";
+}
+function refAparelho(id){ return S.db.collection("aparelhos").doc(id||S.dev); }
+function registrarAparelho(novo){
+  if(!S.db) return;
+  const dados = {dev:S.dev, posto:S.posto||"", modelo:modeloAparelho(), visto:Date.now()};
+  try{
+    if(novo){
+      dados.criado = Date.now(); dados.situacao = (S.cfg && S.cfg.aprovarAparelhos)? "pendente" : "ativo";
+      refAparelho().set(dados).catch(()=>{});
+    } else {
+      /* só atualiza um registro que já existe: nunca recria um aparelho removido nem pula a liberação */
+      refAparelho().update(dados).catch(()=>{});
+    }
+  }catch(e){}
+}
+function assinarAparelhos(){
+  let criado = false;
+  S.assinaturas.push(refAparelho().onSnapshot((snap)=>{
+    if(!snap.exists){
+      S.devSit = "";
+      if(!snap.metadata.fromCache && !criado){ criado = true;
+        /* só registra depois de saber, pela nuvem, se aparelho novo precisa de liberação */
+        if(S.cfgPronto) registrarAparelho(true); else S.registrarDepois = true; }
+      desenhar(); return;
+    }
+    const x = snap.data(); const antes = S.devSit;
+    S.devSit = x.situacao || "ativo";
+    if(antes && antes!=="ativo" && S.devSit==="ativo") aviso("<b>Aparelho liberado</b>Pode vender");
+    desenhar();
+  }, ()=>{}));
+  S.assinaturas.push(S.db.collection("aparelhos").onSnapshot((snap)=>{
+    const antes = (S.aparelhos||[]).filter(a=>a.situacao==="pendente").length;
+    S.aparelhos = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+    const agora = S.aparelhos.filter(a=>a.situacao==="pendente").length;
+    if(agora>antes && admin() && S.devSit==="ativo") aviso("<b>Aparelho pedindo liberação</b>Veja em Ajustes → Aparelhos", 5000);
+    if(S.aba==="ajustes") desenhar();
+  }, ()=>{}));
+  registrarAparelho(false);
+  clearInterval(S.pulso); S.pulso = setInterval(()=>registrarAparelho(false), 5*60*1000);
+}
+const haQuanto = (ts)=>{
+  if(!ts) return "nunca";
+  const m = Math.round((Date.now()-ts)/60000);
+  if(m<2) return "agora"; if(m<60) return "há "+m+" min";
+  const h = Math.round(m/60); if(h<24) return "há "+h+" h";
+  const d = Math.round(h/24); return "há "+d+" dia"+(d>1?"s":"");
+};
+function cardAparelhos(){
+  if(!S.db) return "";
+  const lista = (S.aparelhos||[]).slice().sort((a,b)=>{
+    const ord = {pendente:0, ativo:1, bloqueado:2};
+    return (ord[a.situacao||"ativo"]-ord[b.situacao||"ativo"]) || ((b.visto||0)-(a.visto||0)); });
+  const cor = {ativo:"var(--verde)", pendente:"var(--ambar)", bloqueado:"var(--vermelho, #9a2a1a)"};
+  const nomeSit = {ativo:"liberado", pendente:"aguardando", bloqueado:"bloqueado"};
+  const outrosAtivos = lista.filter(a=>a.id!==S.dev && (a.situacao||"ativo")==="ativo").length;
+  return `<div class="card"><h3>📱 Aparelhos<span class="sub-h">${lista.length} cadastrado(s)</span></h3>
+    <p class="nota">Todo celular que abre o sistema com esta licença aparece aqui. Bloqueie quem não deve mais usar: ele trava na hora, sem precisar pegar o aparelho.</p>
+    <button class="bt bt-quieto" style="margin-top:10px;justify-content:space-between" data-acao="alterna-aprovar">
+      <span>Aparelho novo precisa da minha liberação</span><span>${S.cfg && S.cfg.aprovarAparelhos? "SIM":"não"}</span></button>
+    <div class="lista" style="margin-top:10px">${lista.map(a=>{
+      const sit = a.situacao||"ativo", eu = a.id===S.dev;
+      return `<div class="aparelho">
+        <div class="ap-topo"><span class="ap-nome">${esc(a.posto||"sem nome")}${eu? ' <em>(este)</em>':""}</span>
+          <span class="ap-sit" style="background:${cor[sit]}">${nomeSit[sit]}</span></div>
+        <div class="nota">${esc(a.modelo||"")} · visto ${haQuanto(a.visto)}</div>
+        ${eu? "" : `<div class="btns-lado" style="margin-top:8px">
+          ${sit!=="ativo"? `<button class="bt bt-ok bt-mini" data-ap="liberar:${esc(a.id)}">Liberar</button>`:""}
+          ${sit!=="bloqueado"? `<button class="bt bt-perigo bt-mini" data-ap="bloquear:${esc(a.id)}">Bloquear</button>`:""}
+          <button class="bt bt-quieto bt-mini" data-ap="remover:${esc(a.id)}">Remover da lista</button></div>`}
+      </div>`; }).join("") || `<p class="nota">Nenhum aparelho registrado ainda.</p>`}</div>
+    ${outrosAtivos? `<div class="btns"><button class="bt bt-perigo" data-acao="bloquear-todos">Bloquear todos os outros (${outrosAtivos})</button></div>`:""}
+    <p class="nota" style="margin-top:8px"><b>Bloquear</b>: o aparelho trava e só volta se você liberar. <b>Remover da lista</b>: apaga o registro; se abrir de novo, ele reaparece${S.cfg&&S.cfg.aprovarAparelhos? " aguardando liberação":""}.</p>
+  </div>`;
+}
+function telaAparelhoTravado(){
+  const pend = S.devSit==="pendente";
+  return `<div class="card" style="margin-top:0"><h3>${pend? "⏳ Aguardando liberação" : "🔒 Aparelho bloqueado"}</h3>
+    <p class="nota">${pend? "Este aparelho é novo nesta licença. Peça ao responsável para liberar em <b>Ajustes → Aparelhos</b>. Assim que ele liberar, a tela abre sozinha."
+      : "O responsável bloqueou este aparelho. As vendas feitas antes continuam guardadas na nuvem."}</p>
+    ${pend && !S.posto? `<label class="rot" for="in-posto" style="margin-top:12px;display:block">Dê um nome a este aparelho (ex.: Caixa 2, Bar da pista)</label>
+      <input class="campo" id="in-posto" autocomplete="off">
+      <div class="btns"><button class="bt bt-quieto" data-acao="salvar-posto">Salvar nome</button></div>`
+    : `<div class="item" style="margin-top:10px"><span class="cresce">Este aparelho</span><span class="val">${esc(S.posto||"sem nome")} · ${esc(modeloAparelho())}</span></div>`}
+    <label class="rot" for="in-lib" style="margin-top:14px;display:block">É o responsável? Digite a senha para liberar</label>
+    <input class="campo" id="in-lib" inputmode="numeric" type="password" autocomplete="off">
+    <div class="btns"><button class="bt bt-ouro" data-acao="liberar-este">Liberar este aparelho</button></div>
+  </div>`;
+}
+
 function assinarEvento(){ try{ assinarEvento2(); }catch(e){ falhaGrave(e); } }
 function assinarEvento2(){
   /* começa com as cópias locais deste aparelho, para nunca sobrescrever vendas antes da nuvem responder */
@@ -3578,7 +3682,7 @@ async function enviarLocaisParaNuvem(){
 /* ═══════════ dados locais ═══════════ */
 function iniciarDados(){
   S.assinaturas.forEach(a=>{ try{ a(); }catch(e){} }); S.assinaturas = [];
-  S.db = null; S.raiz = null; S.bloqueado = false; S.pendentes = 0;
+  S.db = null; S.raiz = null; S.bloqueado = false; S.pendentes = 0; S.devSit = ""; S.aparelhos = []; S.cfgPronto = false; S.registrarDepois = false; clearInterval(S.pulso);
   if(querNuvem()) iniciarNuvem(); else iniciarLocal();
 }
 function iniciarLocal(){
@@ -3642,6 +3746,7 @@ function pintarMenu(){
 function desenhar(){
   const t = $("tela");
   if(!LICENCA.ok){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = telaAtivacao(); return; }
+  if(S.db && (S.devSit==="bloqueado" || S.devSit==="pendente")){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = telaAparelhoTravado(); return; }
   if(S.bloqueado){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = `<div class="card"><h3>🔒 Licença suspensa</h3>
     <p class="nota">Esta licença foi suspensa. Fale com o fornecedor do sistema.${PRODUTO.contato? "<br>"+esc(PRODUTO.contato):""}</p></div>`; return; }
   pintarTopo(); pintarMenu();
@@ -4104,9 +4209,10 @@ function telaAjustes(){
 
     <div class="card"><h3>Este aparelho</h3>
       <div class="item"><span class="cresce">Posto</span><span class="val">${esc(S.posto)}</span></div>
-      <div class="item"><span class="cresce">Aparelhos neste evento</span><span class="val">${[...new Set(Object.values(S.blocos).map(b=>b.posto).filter(Boolean))].length||1}</span></div>
+      <div class="item"><span class="cresce">Aparelho</span><span class="val">${esc(modeloAparelho())}</span></div>
       <div class="btns"><button class="bt bt-quieto" data-acao="trocar-posto">Trocar o nome deste posto</button></div>
     </div>
+    ${cardAparelhos()}
 
     ${FIREBASE? `<div class="card"><h3>☁️ Sincronização</h3>
       <p class="nota">${S.db? "Ligada: todos os aparelhos ativados com a mesma licença veem as mesmas vendas, contas e cardápio em tempo real. Sem internet, continua vendendo e envia quando o sinal voltar."
@@ -5002,8 +5108,21 @@ document.addEventListener("click", async (e)=>{
     confirmar("Remover do cardápio", `Remover <b>${esc(p.n)}</b>? As vendas já registradas continuam no histórico.`,
       "Remover", "tira:"+p.id, true); return;
   }
+  if((el = alvo("data-ap"))){
+    if(!admin()){ aviso("<b>Só o responsável</b>Libere com a senha"); return; }
+    const [op, id] = el.dataset.ap.split(":");
+    const ap = (S.aparelhos||[]).find(x=>x.id===id); const nome = esc((ap&&ap.posto)||"sem nome");
+    if(op==="liberar"){ refAparelho(id).set({situacao:"ativo"}, {merge:true}).catch(()=>{}); aviso("<b>"+nome+" liberado</b>"); return; }
+    if(op==="bloquear"){ confirmar("Bloquear aparelho", `<b>${nome}</b> · ${esc((ap&&ap.modelo)||"")}<br><br>Ele trava na hora e só volta se você liberar.`, "Bloquear", "apbloq:"+id, true); return; }
+    if(op==="remover"){ confirmar("Remover da lista", `<b>${nome}</b><br><br>O registro é apagado. As vendas dele continuam guardadas.`, "Remover", "aprem:"+id, true); return; }
+    return;
+  }
   if((el = alvo("data-confirma"))){
     const [tipo, valor] = el.dataset.confirma.split(":");
+    if(tipo==="apbloq"){ refAparelho(valor).set({situacao:"bloqueado"}, {merge:true}).catch(()=>{}); aviso("<b>Aparelho bloqueado</b>"); }
+    if(tipo==="aprem"){ refAparelho(valor).delete().catch(()=>{}); aviso("<b>Removido da lista</b>"); }
+    if(tipo==="apbloqtodos"){ (S.aparelhos||[]).filter(x=>x.id!==S.dev && (x.situacao||"ativo")!=="bloqueado")
+      .forEach(x=>refAparelho(x.id).set({situacao:"bloqueado"}, {merge:true}).catch(()=>{})); aviso("<b>Todos os outros bloqueados</b>"); }
     if(tipo==="cancelar"){ lancar({tipo:"cancelamento", alvo:valor, total:0}); aviso("<b>Lançamento cancelado</b>"); }
     if(tipo==="tira"){ const ev = JSON.parse(JSON.stringify(S.evento));
       ev.produtos = (ev.produtos||[]).filter(x=>x.id!==valor); await salvarEventoDoc(ev); }
@@ -5017,7 +5136,7 @@ document.addEventListener("click", async (e)=>{
     const a = el.dataset.acao;
     if(a==="salvar-posto"){
       const v = ($("in-posto").value||"").trim(); if(!v) return;
-      S.posto = v; guardar("posto", v); abrirBloco(); desenhar(); return;
+      S.posto = v; guardar("posto", v); abrirBloco(); registrarAparelho(false); desenhar(); return;
     }
     if(a==="trocar-posto"){ S.posto=""; guardar("posto",""); desenhar(); return; }
     if(a==="limpar"){ S.carrinho = {}; S.carrinhoExtra = {}; desenhar(); return; }
@@ -5052,6 +5171,24 @@ document.addEventListener("click", async (e)=>{
     }
     if(a==="tirar-logo-org"){ S.cfg = Object.assign({}, S.cfg, {org:Object.assign({}, S.cfg.org||{}, {logo:""})}); salvarCfg(); desenhar(); return; }
     if(a==="tirar-logo-ev"){ const ev = JSON.parse(JSON.stringify(S.evento)); ev.logo = ""; await salvarEventoDoc(ev); desenhar(); return; }
+    if(a==="alterna-aprovar"){
+      if(!(S.cfg && S.cfg.aprovarAparelhos) && !(S.cfg && S.cfg.pin)){
+        aviso("<b>Crie a senha do responsável primeiro</b>Ajustes → Acesso dos operadores", 5000); return; }
+      S.cfg = Object.assign({}, S.cfg, {aprovarAparelhos: !(S.cfg && S.cfg.aprovarAparelhos)}); salvarCfg();
+      if(S.cfg.aprovarAparelhos) refAparelho().set({situacao:"ativo"}, {merge:true}).catch(()=>{});
+      desenhar(); aviso(S.cfg.aprovarAparelhos? "<b>Liberação ligada</b>Aparelho novo fica esperando você liberar" : "<b>Liberação desligada</b>Aparelho novo já entra liberado", 4000); return;
+    }
+    if(a==="bloquear-todos"){
+      confirmar("Bloquear todos os outros", "Todos os aparelhos, menos este, travam na hora. Você libera um por um depois, se quiser.", "Bloquear todos", "apbloqtodos:x", true); return;
+    }
+    if(a==="liberar-este"){
+      const v = ($("in-lib").value||"").trim();
+      if(S.cfg && S.cfg.pin && codigo(v)===S.cfg.pin){
+        refAparelho().set({situacao:"ativo", visto:Date.now()}, {merge:true}).catch(()=>{});
+        S.devSit = "ativo"; desenhar(); aviso("<b>Aparelho liberado</b>");
+      } else aviso("<b>Senha errada</b>"+(!(S.cfg&&S.cfg.pin)? "Nenhuma senha definida":""), 3000);
+      return;
+    }
     if(a==="religar-nuvem"){ S.forcarLocal = false; S.erro = ""; guardar("sync", true); fechaFolha(); iniciarDados(); return; }
     if(a==="alterna-sync"){
       S.forcarLocal = false; guardar("sync", !S.db); iniciarDados();
