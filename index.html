@@ -3139,6 +3139,10 @@ function logosPdf(doc, y){
   else pos(ev || og, 105, "meio");
   return y + 24;
 }
+const foneBR = (f)=>{ const d=String(f||"").replace(/\D/g,"").replace(/^55(?=\d{10,11}$)/,"");
+  if(d.length===11) return "("+d.slice(0,2)+") "+d.slice(2,7)+"-"+d.slice(7);
+  if(d.length===10) return "("+d.slice(0,2)+") "+d.slice(2,6)+"-"+d.slice(6);
+  return String(f||""); };
 const dataBR = (iso)=> iso? iso.split("-").reverse().join("/") : "";
 const org = ()=> Object.assign({}, (S && S.cfg && S.cfg.org) || {}, LICENCA.ok? {nome:LICENCA.nome} : {});
 const orgLinha = ()=> [org().nome, org().cidade].filter(Boolean).join(" · ");
@@ -3375,11 +3379,12 @@ function recalcular(){
   C.todos = todos; C.cancelados = canc; C.validos = validos;
 
   const mapa = new Map();
-  S.clientes.forEach(c=> mapa.set(c.slug, {slug:c.slug, nome:c.nome, fone:c.fone||"",
+  const foneCadastro = (s)=>{ const p = (S.pessoas||[]).find(x=>x.slug===s); return (p && p.fone) || ""; };
+  S.clientes.forEach(c=> mapa.set(c.slug, {slug:c.slug, nome:c.nome, fone:c.fone||foneCadastro(c.slug),
     deve:0, pagou:0, ultima:0, mov:[]}));
   validos.forEach(e=>{
     if(!e.cli) return;
-    if(!mapa.has(e.cli)) mapa.set(e.cli, {slug:e.cli, nome:e.cliNome||e.cli, fone:"", deve:0, pagou:0, ultima:0, mov:[]});
+    if(!mapa.has(e.cli)) mapa.set(e.cli, {slug:e.cli, nome:e.cliNome||e.cli, fone:foneCadastro(e.cli), deve:0, pagou:0, ultima:0, mov:[]});
     const c = mapa.get(e.cli);
     if(e.tipo==="venda" && e.forma==="fiado") c.deve += e.total;
     if(e.tipo==="pagamento") c.pagou += e.total;
@@ -4434,18 +4439,19 @@ async function pdfConta(slugCli){
 
   doc.setFontSize(12); doc.text(c.nome, M, y);
   doc.setFont("helvetica","normal"); doc.setFontSize(9);
-  if(c.fone) dir(c.fone, y);
+  if(c.fone) dir(foneBR(c.fone), y);
   y += 5; doc.text("Emitida em "+agora(), M, y); y += 9;
 
   titulo("Consumo por item");
   doc.setFont("helvetica","bold"); doc.setFontSize(8.5); doc.setTextColor(110,95,70);
   doc.text("ITEM", M, y); doc.text("QTD", L-32, y, {align:"right"}); dir("TOTAL", y);
-  doc.setTextColor(0,0,0); y += 5;
+  doc.setTextColor(0,0,0); y += 6;
   doc.setFont("helvetica","normal"); doc.setFontSize(10);
   r.linhas.forEach(([n,d])=>{ quebra();
-    doc.text(String(n), M, y, {maxWidth:112});
+    const nl = doc.splitTextToSize(String(n), 112);
     doc.text(String(d.q), L-32, y, {align:"right"}); dir(fmt(d.t), y);
-    y += 5.4; doc.setDrawColor(226,213,188); doc.setLineWidth(.2); doc.line(M, y-1.8, L, y-1.8); });
+    nl.forEach((l,i)=>{ doc.text(l, M, y); if(i<nl.length-1) y += 4.6; });
+    doc.setDrawColor(226,213,188); doc.setLineWidth(.2); doc.line(M, y+2.3, L, y+2.3); y += 7; });
   y += 4;
 
   titulo("Compra por compra");
@@ -4458,7 +4464,7 @@ async function pdfConta(slugCli){
     const itens = (v.itens||[]).map(i=>i.q+"x "+i.n).join(", ");
     const linhas = doc.splitTextToSize(itens, 130);
     linhas.forEach(l=>{ quebra(); doc.text(l, M, y); y += 4.6; });
-    doc.setDrawColor(226,213,188); doc.setLineWidth(.2); doc.line(M, y-1.6, L, y-1.6); y += 2; });
+    doc.setDrawColor(226,213,188); doc.setLineWidth(.2); doc.line(M, y-2.3, L, y-2.3); y += 2.8; });
   y += 3;
 
   quebra(250);
@@ -4521,10 +4527,10 @@ async function pdfRelatorio(tipo){
     y += 2; doc.setDrawColor(120,100,70); doc.setLineWidth(.5); doc.line(M, y, L, y); y += 6; };
   const cabTab = (cols)=>{ doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(110,95,70);
     cols.forEach(([t,x,al])=> doc.text(t, x, y, al?{align:al}:undefined));
-    doc.setTextColor(0,0,0); y += 4.5; doc.setFont("helvetica","normal"); doc.setFontSize(9.5); };
+    doc.setTextColor(0,0,0); y += 5.8; doc.setFont("helvetica","normal"); doc.setFontSize(9.5); };
   const linha = (celulas)=>{ quebra();
     celulas.forEach(([t,x,al])=> doc.text(String(t), x, y, al?{align:al, maxWidth:120}:{maxWidth:95}));
-    y += 5.2; doc.setDrawColor(228,216,192); doc.setLineWidth(.15); doc.line(M, y-1.8, L, y-1.8); };
+    doc.setDrawColor(228,216,192); doc.setLineWidth(.15); doc.line(M, y+2.2, L, y+2.2); y += 6.8; };
   const total = (rot, val)=>{ quebra(); doc.setFont("helvetica","bold"); doc.setFontSize(10.5);
     doc.text(rot, M, y); dir(val, y); doc.setFont("helvetica","normal"); doc.setFontSize(9.5); y += 7; };
   const caixinhas = (lista)=>{
@@ -4612,11 +4618,11 @@ async function pdfRelatorio(tipo){
     cabTab([["CLIENTE",M],["TELEFONE",M+62],["CONSUMO",L-56,"right"],["PAGO",L-28,"right"],["SALDO",L,"right"]]);
     [...C.contas].sort((a,b)=>b.saldo-a.saldo || b.deve-a.deve).forEach(c=>{ quebra();
       doc.text(String(c.nome).slice(0,28), M, y);
-      doc.text(String(c.fone||"—"), M+62, y);
+      doc.text(c.fone? foneBR(c.fone) : "—", M+62, y);
       dir(fmt(c.saldo), y);
       doc.text(fmt(c.deve), L-56, y, {align:"right"});
       doc.text(fmt(c.pagou), L-28, y, {align:"right"});
-      y += 5.2; doc.setDrawColor(228,216,192); doc.setLineWidth(.15); doc.line(M, y-1.8, L, y-1.8); });
+      doc.setDrawColor(228,216,192); doc.setLineWidth(.15); doc.line(M, y+2.2, L, y+2.2); y += 6.8; });
     y += 2; total("FIADO EM ABERTO", "R$ "+fmt(r.aberto));
     const devedores = C.contas.filter(c=>c.saldo>0.004);
     if(devedores.length){
@@ -4624,10 +4630,10 @@ async function pdfRelatorio(tipo){
       cabTab([["CLIENTE",M],["TELEFONE",M+70],["SALDO",L-26,"right"],["RECEBIDO",L,"right"]]);
       devedores.sort((a,b)=>b.saldo-a.saldo).forEach(c=>{ quebra();
         doc.text(String(c.nome).slice(0,30), M, y);
-        doc.text(String(c.fone||"—"), M+70, y);
+        doc.text(c.fone? foneBR(c.fone) : "—", M+70, y);
         doc.text(fmt(c.saldo), L-26, y, {align:"right"});
         doc.setDrawColor(150,130,100); doc.rect(L-18, y-3.2, 16, 4.4);
-        y += 6; doc.setDrawColor(228,216,192); doc.setLineWidth(.15); doc.line(M, y-2.2, L, y-2.2); });
+        doc.setDrawColor(228,216,192); doc.setLineWidth(.15); doc.line(M, y+2.8, L, y+2.8); y += 7.6; });
       y += 2;
     }
   }
@@ -4652,7 +4658,7 @@ async function pdfRelatorio(tipo){
       y += 5; 
       if(linhas[1]){ doc.setFontSize(9); doc.text(linhas[1].slice(0,60), M+26, y); y += 4.6; }
       doc.setTextColor(0,0,0);
-      doc.setDrawColor(228,216,192); doc.setLineWidth(.15); doc.line(M, y-1.6, L, y-1.6); });
+      doc.setDrawColor(228,216,192); doc.setLineWidth(.15); doc.line(M, y-2.6, L, y-2.6); y += 2.4; });
     y += 2; total("TOTAL DOS LANÇAMENTOS", String(mov.length));
   }
 
@@ -4881,6 +4887,8 @@ document.addEventListener("click", async (e)=>{
   }
   if((el = alvo("data-fiado-cadastro"))){
     const p = S.pessoas.find(x=>x.slug===el.dataset.fiadoCadastro); if(!p) return;
+    if(!p.fone && !(S.evento && S.evento.semFone === true)){
+      folhaNovoCliente(p.nome, Object.entries(S.carrinho).reduce((s,[id,q])=>s+prod(id).p*q,0)); return; }
     await usarPessoa(p.slug); recalcular();
     fecharVenda("fiado", p.slug, p.nome); return;
   }
