@@ -3464,7 +3464,7 @@ function gravarNuvem(ref, dados){
   catch(e){ falhaGrave(e); return Promise.resolve(); }
   S.pendentes++; pintarSinal();
   /* não espera o servidor: sem internet o Firebase guarda e envia depois */
-  p.then(()=>{ S.pendentes = Math.max(0,S.pendentes-1); S.erro=""; pintarSinal(); })
+  p.then(()=>{ S.pendentes = Math.max(0,S.pendentes-1); S.erro=""; if(S.nuvem!=="erro") S.nuvem="ok"; pintarSinal(); })
     .catch((e)=>{ S.pendentes = Math.max(0,S.pendentes-1); S.erro=(e&&e.code)||"falha"; S.nuvem="erro"; pintarSinal();
       aviso("<b>Não salvou na nuvem</b>"+esc(S.erro), 5000); });
   return Promise.resolve();
@@ -3517,8 +3517,9 @@ function assinarNuvem2(){
     S.bloqueado = !!(snap.exists && snap.data().bloqueado);
     desenhar();
   }, ()=>{}));
-  S.assinaturas.push(S.db.doc("cfg/geral").onSnapshot((snap)=>{
-    if(!snap.exists && snap.metadata.fromCache && S.cfg && S.cfg.ev) return;
+  S.assinaturas.push(S.db.doc("cfg/geral").onSnapshot({includeMetadataChanges:true}, (snap)=>{
+    if(!snap.metadata.fromCache && S.nuvem!=="erro") S.nuvem = "ok";
+    if(!snap.exists && snap.metadata.fromCache && S.cfg && S.cfg.ev){ pintarSinal(); return; }
     S.cfg = snap.exists ? snap.data() : {ev:""};
     if(!snap.metadata.fromCache) S.nuvem = "ok";
     if((S.cfg.ev||"") !== S.evId) entrarNoEvento(S.cfg.ev||"");
@@ -3610,7 +3611,8 @@ function pintarSinal(){
   else if(S.nuvem==="erro"){ classe += " pend"; rotulo = "erro na nuvem"; }
   else if(S.pendentes>0 && (S.nuvem!=="ok" || !navigator.onLine)){ classe += " pend"; rotulo = S.pendentes+" por enviar"; }
   else if(S.nuvem==="ligando"){ classe += " pend"; rotulo = "conectando…"; }
-  else if(!navigator.onLine || S.nuvem==="lenta"){ classe += " pend"; rotulo = "sem internet · salvando"; }
+  else if(!navigator.onLine){ classe += " pend"; rotulo = "sem internet · salvando"; }
+  else if(S.nuvem==="lenta"){ classe += " pend"; rotulo = "conectando…"; }
   el.className = classe; txt.textContent = rotulo;
 }
 function pintarTopo(){
