@@ -3021,7 +3021,8 @@ const FIREBASE = {
   messagingSenderId: "187527490395",
   appId: "1:187527490395:web:7b67b40819f7c7b9a1087e"
 };
-const PRODUTO = {nome:"Bar de Eventos", versao:"1.0", desenvolvedor:"", contato:""};
+const PRODUTO = {nome:"Bar de Eventos", versao:"1.0", desenvolvedor:"Sítio Talayeh", contato:"Direct do Instagram @sitiotalayeh",
+  site:"https://sitiotalayeh.github.io/bar-eventos/"};
 /* ═══════════ licença ═══════════ */
 const LIC = (()=>{
   const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
@@ -4270,7 +4271,8 @@ function telaAjustes(){
       <div class="item"><span class="cresce">Licenciado para</span><span class="val">${esc(LICENCA.nome||"")}</span></div>
       <div class="item"><span class="cresce">Validade</span><span class="val">${LICENCA.validade? esc(dataBR(LICENCA.validade)) : "vitalícia"}</span></div>
       <div class="item"><span class="cresce">Chave</span><span class="val" style="font-family:ui-monospace,monospace;font-size:12px">${esc(LICENCA.chave||"")}</span></div>
-      <div class="btns"><button class="bt bt-quieto" data-acao="trocar-chave">Renovar / trocar chave</button></div>
+      <div class="btns"><button class="bt bt-quieto" data-acao="trocar-chave">Renovar / trocar chave</button>
+        <button class="bt bt-quieto" data-acao="pdf-manual">📘 Manual do sistema (PDF)</button></div>
     </div>
     <p class="nota" style="text-align:center;margin:18px 0 6px">${esc(PRODUTO.nome)} · versão ${esc(PRODUTO.versao)}${PRODUTO.desenvolvedor? "<br>Desenvolvido por "+esc(PRODUTO.desenvolvedor):""}${PRODUTO.contato? " · "+esc(PRODUTO.contato):""}</p>`;
 }
@@ -4556,6 +4558,147 @@ function linkWhats(c){
   const texto = `Olá ${c.nome}! Segue sua conta do bar — ${S.evento.nome}:\n\n${lista}${extra}`
     + `\n\nConsumo: R$ ${fmt(c.deve)}${pago}\nSALDO: R$ ${fmt(Math.max(c.saldo,0))}${pix}\n\n${fim}`;
   return "https://wa.me/"+numero+"?text="+encodeURIComponent(texto);
+}
+/* ── manual personalizado ── */
+const MANUAL = [
+  {h:"1. Instalação", p:["Instale em cada celular que vai vender no bar. Leva menos de 1 minuto por aparelho."],
+   sub:[
+    {t:"iPhone", n:["Abra o Safari e entre no endereço do sistema. Precisa ser o Safari: aberto pelo WhatsApp ou pelo app Arquivos, o sistema não sincroniza.",
+      "Toque em Compartilhar (o quadrado com a seta para cima).", "Toque em Adicionar à Tela de Início e depois em Adicionar.",
+      "Abra sempre pelo ícone Bar de Eventos na tela inicial."]},
+    {t:"Android", n:["Abra o Chrome e entre no endereço do sistema.", "Toque nos três pontinhos no canto de cima.",
+      "Toque em Adicionar à tela inicial (ou Instalar app)."]},
+    {t:"Computador", p:["Abra o endereço no Chrome, Edge ou Safari e salve nos favoritos."]}]},
+  {h:"2. Ativação", n:["Na tela Ativar, digite o nome do organizador exatamente como recebeu.", "Cole ou digite a chave de ativação.", "Toque em Ativar."],
+   p:["Em todos os celulares do bar, use o mesmo nome e a mesma chave: todos passam a ver as mesmas vendas, contas, cardápio e senha. O nome licenciado aparece no topo, nas comandas e nos relatórios."]},
+  {h:"3. Antes do evento", p:["Faça esta preparação uma vez, no celular do responsável, em Ajustes."],
+   n:["Organizador: confira a cidade e coloque a logo da sua empresa.",
+      "Evento: toque em Cadastrar novo evento e preencha nome, datas, chave PIX e titular do PIX.",
+      "Logo do evento: no card Evento, toque em Escolher logo.",
+      "Mensagem do rodapé: escreva um agradecimento. Ele vai no PDF da conta e na cobrança.",
+      "Produtos e fichas: confira o cardápio, ajuste valores e crie o que faltar.",
+      "Senha do responsável: em Acesso dos operadores, crie uma senha de 4 a 8 números.",
+      "Impressos: em Impressos do evento, gere o cardápio com QR do PIX e as fichas para recorte."],
+   b:["Exigir WhatsApp ao abrir fiado novo: com SIM, ninguém abre fiado sem telefone.",
+      "Celulares dos operadores: dê um nome ao posto (Caixa 1, Bar) e toque em Travar este aparelho no modo operador. O operador só vê Vender e Fiado."]},
+  {h:"4. Vender", n:["Na aba Vender, toque nos produtos. Cada toque soma uma unidade.", "Ajuste as quantidades com + e -.",
+      "Toque em Fechar venda e escolha: Dinheiro, PIX, Débito, Crédito ou Fiado."],
+   b:["PIX: a tela mostra o valor, a chave em letras grandes com o botão Copiar chave e o QR Code com o valor. Confira o comprovante e toque em Pagamento recebido.",
+      "Valor avulso: para algo fora do cardápio, use Valor avulso no fim da lista.",
+      "Cancelar: em Relatórios > Movimento, toque no X do lançamento. Fica registrado no histórico."]},
+  {h:"5. Fiado", n:["Monte a comanda, toque em Fechar venda e depois em Fiado.",
+      "Digite o nome. Cliente com conta no evento: lançar. Cliente de eventos anteriores: usar (o telefone vem junto). Cliente novo: Abrir conta, com WhatsApp e DDD."],
+   b:["Na aba Fiado, ordene por Maior dívida ou A > Z e toque no nome para receber, enviar a conta no WhatsApp ou baixar o PDF.",
+      "No fim do evento, toque em Cobrar os devedores: abre um por um no WhatsApp com a conta escrita."]},
+  {h:"6. Estoque", p:["Opcional. Na aba Estoque, toque no produto, informe a quantidade que entrou, o custo por unidade e quando avisar. O saldo baixa a cada venda e o sistema avisa quando está acabando. O lucro bruto considera os produtos com custo cadastrado."]},
+  {h:"7. Relatórios e fechamento", b:["Resumo: total vendido, dinheiro em caixa, fiado em aberto, lucro e formas de pagamento.",
+      "Vendas: mais vendidos, por posto e por hora.", "Clientes: quem mais consumiu e lista de cobrança.",
+      "Movimento: últimos lançamentos, com cancelamento.", "Eventos: comparativo dos eventos já feitos."],
+   p:["No fim de cada dia, gere o PDF Relatório completo, com espaço para assinatura de quem fechou e de quem conferiu."]},
+  {h:"8. Aparelhos: dono, gerentes e bloqueio", b:["Dono: libera e bloqueia qualquer aparelho, cria gerentes e pode passar o papel de dono. Ninguém consegue bloqueá-lo.",
+      "Gerente: libera e bloqueia os aparelhos comuns.", "Comum: vende normalmente.",
+      "Aparelho novo precisa da minha liberação: com SIM, um celular novo só vende depois de liberado.",
+      "Bloquear todos os outros: no fim do evento, trava de uma vez os aparelhos comuns.",
+      "Passar dono: para trocar de celular, libere o novo e toque em Passar dono nele."],
+   p:["Tudo isso fica em Ajustes > Aparelhos. Não passe a senha do responsável para os operadores."]},
+  {h:"9. Internet, sincronização e backup", b:["sincronizado: tudo enviado.", "N por enviar: vendas guardadas esperando sinal; envia sozinho.",
+      "sem internet · salvando: continue vendendo normalmente.", "conectando...: aguarde alguns segundos."],
+   p:["Antes de fechar o caixa, espere todos os celulares mostrarem sincronizado. No fim de cada evento, baixe o backup em Ajustes > Backup."]},
+  {h:"10. Licença e problemas comuns", b:["Chave não confere: confira se o nome está exatamente como foi enviado.",
+      "Celulares não sincronizam: abra pelo ícone da tela inicial ou pelo navegador, nunca pelo WhatsApp, e use o mesmo nome e chave.",
+      "Versão nova não aparece: feche o app e abra de novo.",
+      "Renovação: faltando 15 dias o sistema avisa. Com a chave nova, use Ajustes > Licença > Renovar / trocar chave."]}
+];
+async function pdfManual(){
+  const J = window.jspdf && window.jspdf.jsPDF; if(!J){ aviso("<b>PDF indisponível</b>"); return; }
+  const doc = new J({unit:"mm", format:"a4"});
+  const M = 20, L = 210-M, W = L-M; let y = 0;
+  const nome = LICENCA.nome || org().nome || "Cliente";
+  const site = /^https?:/.test(location.href) ? location.origin + location.pathname : (PRODUTO.site||"");
+  const ouro = [176,125,22], tinta = [36,26,16], fraco = [110,95,70];
+  const cor = (c)=>doc.setTextColor(c[0],c[1],c[2]);
+  const pagina = ()=>{ doc.addPage(); y = 24; };
+  const cabe = (alt)=>{ if(y + alt > 276) pagina(); };
+  const paragrafo = (txt, tam, estilo, recuo)=>{
+    doc.setFont("helvetica", estilo||"normal"); doc.setFontSize(tam||10.5); cor(tinta);
+    const linhas = doc.splitTextToSize(txtPdf(txt), W-(recuo||0));
+    linhas.forEach(l=>{ cabe(5.5); doc.text(l, M+(recuo||0), y); y += (tam||10.5)*0.47; });
+    y += 1.8;
+  };
+  const lista = (itens, numerada)=>itens.forEach((it,i)=>{
+    doc.setFont("helvetica","normal"); doc.setFontSize(10.5);
+    const linhas = doc.splitTextToSize(txtPdf(it), W-8);
+    cabe(5.5);
+    if(numerada){ doc.setFont("helvetica","bold"); cor(ouro); doc.text((i+1)+".", M+1, y); }
+    else { doc.setFillColor(ouro[0],ouro[1],ouro[2]); doc.circle(M+2.4, y-1.35, .85, "F"); }
+    doc.setFont("helvetica","normal"); cor(tinta);
+    linhas.forEach(l=>{ cabe(5.5); doc.text(l, M+8, y); y += 4.95; });
+    y += 1.4;
+  });
+  /* ── capa ── */
+  doc.setFillColor(74,52,36); doc.rect(0, 0, 210, 297, "F");
+  doc.setFillColor(ouro[0],ouro[1],ouro[2]); doc.rect(0, 200, 210, 2.2, "F");
+  const lg = logoOrg() || logoEvento();
+  if(lg){ try{ const pr = doc.getImageProperties(lg); const alt = 34, larg = Math.min(80, alt*pr.width/pr.height), a2 = larg*pr.height/pr.width;
+    doc.setFillColor(255,255,255); doc.roundedRect(105-larg/2-5, 46-5, larg+10, a2+10, 4, 4, "F");
+    doc.addImage(lg, /png/i.test(lg.slice(0,30))?"PNG":"JPEG", 105-larg/2, 46, larg, a2); }catch(e){} }
+  doc.setTextColor(247,238,220); doc.setFont("helvetica","bold"); doc.setFontSize(34);
+  doc.text("MANUAL", 105, 120, {align:"center"});
+  doc.setFontSize(20); doc.text(txtPdf(PRODUTO.nome), 105, 132, {align:"center"});
+  doc.setFont("helvetica","normal"); doc.setFontSize(12); doc.setTextColor(220,200,160);
+  doc.text("Edição exclusiva para", 105, 160, {align:"center"});
+  doc.setFont("helvetica","bold"); doc.setFontSize(20); doc.setTextColor(255,255,255);
+  doc.splitTextToSize(txtPdf(nome), 160).forEach((l,i)=>doc.text(l, 105, 171+i*9, {align:"center"}));
+  doc.setFont("helvetica","normal"); doc.setFontSize(10); doc.setTextColor(220,200,160);
+  doc.text("Versão "+PRODUTO.versao+" · "+dataBR(hoje()), 105, 214, {align:"center"});
+  if(PRODUTO.desenvolvedor) doc.text("Desenvolvido por "+txtPdf(PRODUTO.desenvolvedor), 105, 221, {align:"center"});
+  /* ── agradecimento ── */
+  pagina(); y = 34;
+  doc.setFont("helvetica","bold"); doc.setFontSize(22); cor(tinta);
+  doc.text(doc.splitTextToSize("Obrigado, "+txtPdf(nome)+"!", W), M, y); y += 14 + (doc.splitTextToSize("Obrigado, "+txtPdf(nome)+"!", W).length-1)*9;
+  doc.setDrawColor(ouro[0],ouro[1],ouro[2]); doc.setLineWidth(.8); doc.line(M, y-6, M+30, y-6);
+  paragrafo("Agradecemos a aquisição do "+PRODUTO.nome+" e, principalmente, a confiança no nosso trabalho. É uma alegria saber que o bar dos seus eventos vai ser controlado com o nosso sistema.", 11.5);
+  paragrafo("Este manual foi preparado especialmente para "+nome+". Ele mostra, passo a passo, como instalar o sistema nos celulares da sua equipe, preparar cada evento, vender, controlar o fiado, imprimir cardápio e fichas, e fechar o caixa com segurança.", 11.5);
+  paragrafo("Sempre que precisar, conte com a gente. Bons eventos e boas vendas!", 11.5);
+  if(PRODUTO.contato) paragrafo("Dúvidas e novas aquisições: "+PRODUTO.contato+".", 11.5, "bold");
+  if(PRODUTO.desenvolvedor){ y += 4; paragrafo(PRODUTO.desenvolvedor, 11.5, "bold"); }
+  y += 6;
+  /* dados da licença */
+  const linhasLic = [["Licenciado para", nome], ["Validade", LICENCA.validade? dataBR(LICENCA.validade) : "vitalícia"],
+    ["Endereço do sistema", site], ["Dúvidas e novas aquisições", PRODUTO.contato || "fale com quem lhe vendeu o sistema"]];
+  const altBox = 10 + linhasLic.length*8;
+  doc.setFillColor(251,246,236); doc.setDrawColor(ouro[0],ouro[1],ouro[2]); doc.setLineWidth(.5);
+  doc.roundedRect(M, y, W, altBox, 3, 3, "FD");
+  doc.setFont("helvetica","bold"); doc.setFontSize(10); cor(ouro); doc.text("SUA LICENÇA", M+6, y+8);
+  linhasLic.forEach(([k,v],i)=>{ const yy = y+16+i*8;
+    doc.setFont("helvetica","normal"); doc.setFontSize(9.5); cor(fraco); doc.text(k, M+6, yy);
+    doc.setFont("helvetica","bold"); cor(tinta); doc.text(doc.splitTextToSize(txtPdf(v), W-64)[0], M+57, yy); });
+  y += altBox + 8;
+  doc.setFont("helvetica","italic"); doc.setFontSize(9); cor(fraco);
+  doc.text(doc.splitTextToSize("Guarde a sua chave de ativação em local seguro. Ela é usada para instalar o sistema em novos celulares e não deve ser compartilhada fora da sua equipe.", W), M, y);
+  /* ── conteúdo ── */
+  pagina();
+  doc.setFont("helvetica","bold"); doc.setFontSize(18); cor(tinta); doc.text("Como usar", M, y); y += 10;
+  MANUAL.forEach(s=>{
+    cabe(22);
+    doc.setFillColor(ouro[0],ouro[1],ouro[2]); doc.rect(M, y-4.6, 1.6, 6.2, "F");
+    doc.setFont("helvetica","bold"); doc.setFontSize(13.5); cor(tinta); doc.text(txtPdf(s.h), M+4.5, y); y += 7.5;
+    (s.p||[]).forEach(t=>paragrafo(t));
+    (s.sub||[]).forEach(u=>{ cabe(14); doc.setFont("helvetica","bold"); doc.setFontSize(11); cor(ouro); doc.text(txtPdf(u.t), M, y); y += 5.6;
+      if(u.n) lista(u.n, true); (u.p||[]).forEach(t=>paragrafo(t)); });
+    if(s.n) lista(s.n, true);
+    if(s.b) lista(s.b, false);
+    y += 4;
+  });
+  /* rodapé com página */
+  const tot = doc.getNumberOfPages();
+  for(let i=2;i<=tot;i++){ doc.setPage(i);
+    doc.setDrawColor(226,213,188); doc.setLineWidth(.3); doc.line(M, 284, L, 284);
+    doc.setFont("helvetica","normal"); doc.setFontSize(8); cor(fraco);
+    doc.text(txtPdf(PRODUTO.nome+" · Manual de "+nome), M, 289);
+    doc.text(i+" / "+tot, L, 289, {align:"right"}); }
+  doc.setTextColor(0,0,0);
+  await entregar("manual_"+(slug(nome)||"bar-eventos")+".pdf", doc.output("blob"), "application/pdf");
 }
 /* ── fichas para recorte ── */
 function folhaFichas(){
@@ -5369,7 +5512,14 @@ document.addEventListener("click", async (e)=>{
         aviso("<b>Chave de outro organizador</b>Este aparelho já está licenciado para "+esc(anterior.nome), 5000); return; }
       guardar("licenca", {nome, chave:r.chave}); lerLicenca();
       S.cfg = Object.assign({}, S.cfg, {org:Object.assign({}, (S.cfg&&S.cfg.org)||{}, {nome})}); guardar("local.cfg", S.cfg);
-      fechaFolha(); iniciarDados(); desenhar(); aviso("<b>Ativado</b>"+(r.validade? "Válido até "+esc(dataBR(r.validade)) : "Licença vitalícia")); return;
+      fechaFolha(); iniciarDados(); desenhar();
+      if(!anterior) setTimeout(()=>folha(`<div class="olho">Bem-vindo</div>
+        <h2 style="font-family:var(--disp);font-size:24px;text-transform:uppercase;margin:4px 0 8px">Obrigado, ${esc(nome)}!</h2>
+        <p class="nota" style="font-size:14px">Sua licença do ${esc(PRODUTO.nome)} está ativa. Preparamos um manual com o seu nome, explicando a instalação e o uso do sistema passo a passo.</p>
+        <div class="btns"><button class="bt bt-ouro" data-acao="pdf-manual">📘 Baixar meu manual (PDF)</button>
+        <button class="bt bt-quieto" data-fechar>Agora não</button></div>
+        <p class="nota">O manual fica sempre em Ajustes > Licença.</p>`), 600);
+      aviso("<b>Ativado</b>"+(r.validade? "Válido até "+esc(dataBR(r.validade)) : "Licença vitalícia")); return;
     }
     if(a==="tirar-logo-org"){ S.cfg = Object.assign({}, S.cfg, {org:Object.assign({}, S.cfg.org||{}, {logo:""})}); salvarCfg(); desenhar(); return; }
     if(a==="tirar-logo-ev"){ const ev = JSON.parse(JSON.stringify(S.evento)); ev.logo = ""; await salvarEventoDoc(ev); desenhar(); return; }
@@ -5402,6 +5552,7 @@ document.addEventListener("click", async (e)=>{
       return;
     }
     if(a==="pdf-cardapio"){ pdfCardapio(); return; }
+    if(a==="pdf-manual"){ fechaFolha(); pdfManual(); return; }
     if(a==="fichas-escolher"){ folhaFichas(); return; }
     if(a==="fichas-todos"){ document.querySelectorAll("[data-fq]").forEach(i=>i.value = $("fq-todos").value||0); return; }
     if(a==="fichas-gerar"){
