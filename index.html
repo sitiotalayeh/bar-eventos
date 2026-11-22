@@ -3300,7 +3300,7 @@ S.travado = false; guardar("travado", false);   /* modo operador antigo: substit
 function papel(){
   if(!S.db) return "gestor";
   const eu = (S.aparelhos||[]).find(a=>a.id===S.dev);
-  if(eu){ const p = eu.gerente? "gestor" : "comum"; if(lembrar("papel","")!==p) guardar("papel", p); return p; }
+  if(eu){ const p = eu.cliente? "cliente" : eu.gerente? "gestor" : "comum"; if(lembrar("papel","")!==p) guardar("papel", p); return p; }
   if(S.apPronto && !(S.aparelhos||[]).some(a=>a.gerente)) return "gestor";
   return lembrar("papel", "") || "comum";
 }
@@ -3533,13 +3533,25 @@ function assinarNuvem2(){
     desenhar();
   }, ()=>{}));
   assinarAparelhos();
+  S.assinaturas.push(S.db.collection("avisos").onSnapshot((snap)=>{
+    const antes = (S.avisos||[]).filter(a=>!a.visto).length;
+    S.avisos = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+    const agora = S.avisos.filter(a=>!a.visto).length;
+    if(agora>antes && S.avisosProntos && admin()) aviso("<b>Aviso de pagamento</b>Um cliente do bar mensal avisou que pagou", 5000);
+    if(!snap.metadata.fromCache) S.avisosProntos = true;
+    desenhar();
+  }, ()=>{}));
+  S.assinaturas.push(S.db.collection("convites").onSnapshot((snap)=>{
+    S.convites = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+    if(S.aba==="ajustes") desenhar();
+  }, ()=>{}));
   S.assinaturas.push(S.db.doc("cfg/geral").onSnapshot({includeMetadataChanges:true}, (snap)=>{
     if(!snap.metadata.fromCache && S.nuvem!=="erro") S.nuvem = "ok";
     if(!snap.exists && snap.metadata.fromCache && S.cfg && S.cfg.ev){ pintarSinal(); return; }
     S.cfg = snap.exists ? snap.data() : {ev:""};
     if(!snap.metadata.fromCache){ S.nuvem = "ok";
       if(!S.cfgPronto){ S.cfgPronto = true; tentarRegistro(); } }
-    if((S.cfg.ev||"") !== S.evId) entrarNoEvento(S.cfg.ev||"");
+    reavaliarEvento(); tentarConvite();
     pintarSinal(); desenhar();
   }, falha));
   S.assinaturas.push(S.db.collection("pessoas").limit(2000).onSnapshot((snap)=>{
@@ -3550,6 +3562,8 @@ function assinarNuvem2(){
     Object.values(S.eventosNovos||{}).forEach(ev=>{ if(!daNuvem.some(x=>x.id===ev.id)) daNuvem.push(ev); else if(!snap.metadata.fromCache) delete S.eventosNovos[ev.id]; });
     S.eventos = daNuvem.sort((a,b)=>(b.criadoEm||0)-(a.criadoEm||0));
     S.evento = S.eventos.find(e=>e.id===S.evId) || null;
+    if(!snap.metadata.fromCache) S.eventosProntos = true;
+    reavaliarEvento();
     ok(snap); recalcular(); pintarSinal(); desenhar();
   }, falha));
   setTimeout(()=>{ if(S.nuvem==="ligando"){ S.nuvem="lenta"; pintarSinal(); } }, 10000);
@@ -3569,7 +3583,32 @@ const souDono = ()=> !!(S.db && meuAparelho() && meuAparelho().gerente);
 const souPrincipal = ()=> !!(S.db && meuAparelho() && meuAparelho().principal);
 const haDono = ()=> (S.aparelhos||[]).some(a=>a.gerente);
 /* registra este aparelho só quando a configuração e a lista de aparelhos já vieram da nuvem */
+/* convite de cliente do bar mensal: o aparelho entra já liberado, preso ao cliente */
+function tentarConvite(){
+  if(!S.convite || !S.db || !S.cfgPronto || !S.apPronto || S.aplicandoConvite) return;
+  S.aplicandoConvite = true;
+  const tok = S.convite;
+  S.db.collection("convites").doc(tok).get().then(async (snap)=>{
+    const eu = meuAparelho();
+    if(!snap.exists || snap.data().revogado){ aviso("<b>Convite inválido ou cancelado</b>Peça um novo convite ao responsável", 6000); }
+    else if(eu && eu.gerente){ aviso("<b>Este aparelho é de gestão</b>O convite de cliente não foi usado aqui", 6000); }
+    else {
+      const cv = snap.data();
+      S.posto = "Cliente · "+cv.nome; guardar("posto", S.posto);
+      guardar("cliSlug", cv.slug); guardar("cliNome", cv.nome); guardar("papel", "cliente");
+      S.registrarDepois = false;
+      try{
+        await refAparelho().set({dev:S.dev, posto:S.posto, modelo:modeloAparelho(), visto:Date.now(), criado:(eu&&eu.criado)||Date.now(),
+          situacao:"ativo", cliente:true, cliSlug:cv.slug, cliNome:cv.nome, gerente:false, principal:false, local:""}, {merge:true});
+        S.db.collection("convites").doc(tok).set({usadoPor:S.dev, usadoEm:Date.now()}, {merge:true}).catch(()=>{});
+        aviso("<b>Bem-vindo, "+esc(cv.nome)+"!</b>Toque no que pegar para lançar na sua conta", 6000);
+      }catch(e){ aviso("<b>Não consegui ativar o convite</b>Confira a internet e abra o link de novo", 6000); }
+    }
+    S.convite = null; guardar("convite", ""); S.aplicandoConvite = false; reavaliarEvento(); desenhar();
+  }).catch(()=>{ S.aplicandoConvite = false; });
+}
 function tentarRegistro(){
+  if(S.convite){ tentarConvite(); return; }
   if(S.registrarDepois && S.cfgPronto && S.apPronto && !meuAparelho()){ S.registrarDepois = false; registrarAparelho(true); }
 }
 function refAparelho(id){ return S.db.collection("aparelhos").doc(id||S.dev); }
@@ -3604,11 +3643,15 @@ function assinarAparelhos(){
   }, ()=>{}));
   S.assinaturas.push(S.db.collection("aparelhos").onSnapshot((snap)=>{
     const antes = (S.aparelhos||[]).filter(a=>a.situacao==="pendente").length;
+    const chaveEu = (x)=> x? [x.gerente, x.principal, x.cliente, x.cliSlug, x.local].join("|") : "";
+    const euAntes = chaveEu(meuAparelho());
     S.aparelhos = snap.docs.map(d=>Object.assign({id:d.id}, d.data()));
+    const mudouEu = euAntes !== chaveEu(meuAparelho());
     if(!snap.metadata.fromCache && !S.apPronto){ S.apPronto = true; tentarRegistro(); }
+    reavaliarEvento(); tentarConvite();
     const agora = S.aparelhos.filter(a=>a.situacao==="pendente").length;
-    if(agora>antes && admin() && S.devSit==="ativo") aviso("<b>Aparelho pedindo liberação</b>Veja em Ajustes → Aparelhos", 5000);
-    if(S.aba==="ajustes") desenhar();
+    if(agora>antes && admin() && S.devSit==="ativo") aviso("<b>Aparelho pedindo liberação</b>Veja em Ajustes → Aparelhos e equipe", 5000);
+    if(mudouEu || S.aba==="ajustes" || agora!==antes) desenhar();
   }, ()=>{}));
   registrarAparelho(false);
   clearInterval(S.pulso); S.pulso = setInterval(()=>registrarAparelho(false), 5*60*1000);
@@ -3651,14 +3694,15 @@ function cardAparelhos(){
           <button class="bt bt-quieto bt-mini" data-ap="passardono:${esc(a.id)}">Passar dono</button>` : "";
         else bts = `${sit!=="ativo"? `<button class="bt bt-ok bt-mini" data-ap="liberar:${esc(a.id)}">Liberar</button>`:""}
           ${sit!=="bloqueado"? `<button class="bt bt-perigo bt-mini" data-ap="bloquear:${esc(a.id)}">Bloquear</button>`:""}
-          ${sit==="ativo" && souPrincipal()? `<button class="bt bt-quieto bt-mini" data-ap="fazerdono:${esc(a.id)}">Tornar gerente</button>`:""}
-          ${sit==="ativo" && souPrincipal()? `<button class="bt bt-quieto bt-mini" data-ap="passardono:${esc(a.id)}">Passar dono</button>`:""}
+          ${sit==="ativo" && souPrincipal() && !a.cliente? `<button class="bt bt-quieto bt-mini" data-ap="fazerdono:${esc(a.id)}">Tornar gerente</button>`:""}
+          ${sit==="ativo" && souPrincipal() && !a.cliente? `<button class="bt bt-quieto bt-mini" data-ap="passardono:${esc(a.id)}">Passar dono</button>`:""}
+          ${!a.cliente && S.cfg && S.cfg.evMensal? `<button class="bt bt-quieto bt-mini" data-ap="local:${esc(a.id)}">${a.local==="mensal"? "Vender no evento" : "Vender no bar mensal"}</button>`:""}
           <button class="bt bt-quieto bt-mini" data-ap="remover:${esc(a.id)}">Remover</button>`;
       }
       return `<div class="aparelho">
         <div class="ap-topo"><span class="ap-nome">${esc(a.posto||"sem nome")}${eu? ' <em>(este)</em>':""}</span>
-          <span class="ap-sit" style="background:${a.gerente? "var(--latao)" : cor[sit]}">${a.principal? "dono" : a.gerente? "gerente" : nomeSit[sit]}</span></div>
-        <div class="nota">${esc(a.modelo||"")} · visto ${haQuanto(a.visto)}</div>
+          <span class="ap-sit" style="background:${a.gerente? "var(--latao)" : cor[sit]}">${a.principal? "dono" : a.gerente? "gerente" : (a.cliente && sit==="ativo")? "cliente" : nomeSit[sit]}</span></div>
+        <div class="nota">${esc(a.modelo||"")} · visto ${haQuanto(a.visto)}${a.cliente? " · conta de "+esc(a.cliNome||""):""}${a.local==="mensal"? " · vende no bar mensal":""}</div>
         ${bts? `<div class="btns-lado" style="margin-top:8px">${bts}</div>`:""}
       </div>`; }).join("") || `<p class="nota">Nenhum aparelho registrado ainda.</p>`}</div>
     ${dono && outrosAtivos? `<div class="btns"><button class="bt bt-perigo" data-acao="bloquear-todos">Bloquear todos os outros (${outrosAtivos})</button></div>`:""}
@@ -3729,10 +3773,27 @@ function iniciarLocal(){
   S.cfg = lembrar("local.cfg", {ev:""});
   S.eventos = lembrar("local.eventos", []);
   S.pessoas = lembrar("local.pessoas", []);
-  entrarNoEvento(S.cfg.ev || (S.eventos[0]&&S.eventos[0].id) || "");
+  S.eventosProntos = true;
+  entrarNoEvento(eventoDoAparelho() || S.cfg.ev || (S.eventos.find(e=>!ehMensal(e))||{}).id || "");
   pintarSinal(); desenhar();
 }
 
+/* cada aparelho trabalha num evento: cliente e aparelho marcado "bar mensal" ficam no mensal;
+   o dono/gerente pode trabalhar num evento só neste aparelho (evLocal); os demais seguem o evento aberto para todos */
+function eventoDoAparelho(){
+  const cfg = S.cfg||{}, eu = meuAparelho();
+  if(papel()==="cliente") return cfg.evMensal||"";
+  if(eu && eu.local==="mensal" && cfg.evMensal) return cfg.evMensal;
+  const loc = lembrar("evLocal","");
+  if(loc && papel()==="gestor"){
+    if(!S.eventosProntos || (S.eventos||[]).some(e=>e.id===loc)) return loc;
+    guardar("evLocal","");
+  }
+  return cfg.ev||"";
+}
+function reavaliarEvento(){ const a = eventoDoAparelho(); if(a !== S.evId) entrarNoEvento(a); }
+function trabalharEm(id){ guardar("evLocal", (id && id!==(S.cfg&&S.cfg.ev))? id : ""); entrarNoEvento(id||((S.cfg&&S.cfg.ev)||"")); S.aba = "vender"; desenhar(); }
+const ehMensal = (ev)=> !!(ev && ev.tipo==="mensal");
 function entrarNoEvento(id){
   S.evId = id || "";
   S.evento = S.eventos.find(e=>e.id===S.evId) || null;
@@ -3764,8 +3825,8 @@ function pintarTopo(){
   $("t-ev").innerHTML = (lg && LICENCA.ok ? `<img class="logo-topo" src="${lg}" alt="">` : "🤠 ") + esc(titulo);
   const partes = [];
   if(S.evento && S.evento.ini) partes.push([org().nome, periodo(S.evento.ini, S.evento.fim)].filter(Boolean).join(" · "));
-  if(S.posto) partes.push(S.posto);
-  if(!admin()) partes.push("operador");
+  if(papel()==="cliente"){ partes.length = 0; if(org().nome) partes.push(org().nome); partes.push("conta de "+(meuCliente().nome||"cliente")); }
+  else { if(S.posto) partes.push(S.posto); if(!admin()) partes.push("venda"); }
   $("t-sub").textContent = partes.join(" · ") || "nenhum evento aberto";
   $("t-lock").hidden = !S.travado;
   pintarSinal();
@@ -3792,6 +3853,7 @@ function desenhar(){
     <p class="nota">Seus dados continuam guardados. Quando a licença for reativada, toque abaixo (precisa de internet).</p>
     <div class="btns"><button class="bt bt-quieto" data-acao="religar-nuvem">Verificar de novo</button>
       <button class="bt bt-quieto" data-acao="trocar-chave">Usar outra chave</button></div></div>`; return; }
+  if(papel()==="cliente"){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = telaCliente(); return; }
   pintarTopo(); pintarMenu();
   if(!S.evento){ t.innerHTML = admin()? telaSemEvento() : (S.db && !S.apPronto)
     ? `<div class="card"><h3>Conectando…</h3><p class="nota">Este aparelho precisa de internet na primeira vez para confirmar se é o aparelho do dono. Assim que conectar, a tela se ajusta sozinha.</p></div>`
@@ -3815,7 +3877,7 @@ function boasVindas(nome){
 /* troca o organizador deste aparelho: guarda os dados locais do atual e traz os do novo, se já existirem */
 function trocarLicenca(nome, chave){
   const ant = lembrar("licenca", null), contaAnt = ant ? LIC.conta(ant.nome) : "";
-  const manter = new Set(["barev.dev","barev.ordemContas"]);
+  const manter = new Set(["barev.dev","barev.ordemContas","barev.convite"]);
   const ks = []; for(let i=0;i<localStorage.length;i++) ks.push(localStorage.key(i));
   try{
     if(contaAnt) ks.filter(k=>k && k.startsWith("barev.") && !manter.has(k)).forEach(k=>{
@@ -3865,9 +3927,189 @@ const cardOrg = (st)=> `<div class="card"${st}><h3>🏷 Organizador</h3>
       ${blocoLogo("org", logoOrg())}
       <p class="nota" style="margin-top:6px">Aparece nas comandas e relatórios de todos os eventos.</p>
     </div>`;
+/* ═══════════ cliente do bar mensal ═══════════ */
+const DESFAZER_MIN = 10;
+function meuCliente(){
+  const eu = meuAparelho()||{};
+  if(eu.cliSlug){ if(lembrar("cliSlug","")!==eu.cliSlug){ guardar("cliSlug", eu.cliSlug); guardar("cliNome", eu.cliNome||""); } }
+  return {slug: eu.cliSlug || lembrar("cliSlug",""), nome: eu.cliNome || lembrar("cliNome","")};
+}
+/* soma a conta de um cliente a partir dos lançamentos de um evento */
+function contaEm(itensEv, slugC){
+  const canc = new Set(itensEv.filter(e=>e.tipo==="cancelamento"&&e.alvo).map(e=>e.alvo));
+  const mov = itensEv.filter(e=>e.tipo!=="cancelamento" && !canc.has(e.id) && e.cli===slugC).sort((a,b)=>b.ts-a.ts);
+  const deve = mov.filter(e=>e.tipo==="venda"&&e.forma==="fiado").reduce((s,e)=>s+e.total,0);
+  const pagou = mov.filter(e=>e.tipo==="pagamento").reduce((s,e)=>s+e.total,0);
+  return {mov, deve, pagou, saldo:deve-pagou};
+}
+function linhasMov(mov, podeDesfazer){
+  if(!mov.length) return `<p class="nota" style="margin-top:8px">Nada lançado ainda.</p>`;
+  return mov.map(e=>{
+    const pag = e.tipo==="pagamento";
+    const desc = pag? "Pagamento · "+nomeForma(e.forma) : (e.itens||[]).map(i=>i.q+"× "+i.n).join(", ");
+    const pode = podeDesfazer && !pag && e.dev===S.dev && (Date.now()-e.ts) < DESFAZER_MIN*60000;
+    return `<div class="item" style="align-items:flex-start;gap:8px">
+      <span class="cresce">${esc(desc)}<span class="sub">${esc(dataHora(e.ts))}${(e.auto||pag)? "":" · lançado no balcão"}</span></span>
+      <span class="val" style="${pag?"color:var(--verde)":""}">${pag?"− ":""}${fmt(e.total)}</span>
+      ${pode? `<button class="bt bt-quieto bt-mini" data-acao="cli-desfaz" data-id="${esc(e.id)}">Desfazer</button>`:""}</div>`;
+  }).join("");
+}
+function blocoPixCliente(valor, evId){
+  const ev = S.eventos.find(e=>e.id===evId) || S.evento || {};
+  if(!(valor>0.004)) return "";
+  const temPix = !!(ev.pix || ev.pixCodigo);
+  const aviso_ = (S.avisos||[]).filter(a=>!a.visto && a.ev===evId && a.cli===meuCliente().slug).sort((a,b)=>b.ts-a.ts)[0];
+  const img = temPix? qrDataUrl(pixCopiaCola(valor), 4) : "";
+  return `<div class="card"><h3>${temPix? "📲 Pagar no PIX" : "💰 Pagamento"}</h3>
+    <p class="nota">Valor em aberto: <b>R$ ${fmt(valor)}</b>${temPix? "" : ". Combine a forma de pagamento com o responsável."}</p>
+    ${img? `<div class="qr-caixa"><img src="${img}" alt="QR Code do PIX com o valor"></div>`:""}
+    ${ev.pix? `<div class="pix-chave"><span class="olho">chave pix</span><strong>${esc(ev.pix)}</strong>
+      ${ev.pixNome? `<div class="titular">${esc(ev.pixNome)}</div>`:""}
+      <div class="btns" style="margin-top:10px"><button class="bt bt-quieto" data-copiar="${esc(ev.pix)}" data-rotulo="Chave PIX copiada">Copiar chave</button></div></div>`:""}
+    ${aviso_? `<div class="faixa" style="margin-top:12px">Você avisou o pagamento de <b>R$ ${fmt(aviso_.valor)}</b> em ${esc(dataHora(aviso_.ts))}. Aguardando o responsável confirmar.</div>`
+      : `<div class="btns"><button class="bt bt-ok" data-acao="cli-paguei" data-ev="${esc(evId)}" data-v="${valor}">Já paguei</button></div>`}
+  </div>`;
+}
+function telaCliente(){
+  const cli = meuCliente();
+  if(!S.evento || !ehMensal(S.evento)) return `<div class="card"><h3>Olá${cli.nome? ", "+esc(cli.nome):""}!</h3>
+    <p class="nota">${S.db && !S.cfgPronto? "Conectando…" : "O bar mensal ainda não está aberto. Avise o responsável."}</p></div>`;
+  const conta = contaEm(C.validos.concat(C.todos.filter(e=>e.tipo==="cancelamento")), cli.slug);
+  const itens = Object.entries(S.carrinho);
+  const total = itens.reduce((s,[id,q])=>s+(prod(id).p*q),0);
+  const ps = produtosAtivos();
+  const cats = ["Todos", ...CATS.filter(c=>ps.some(p=>p.c===c)), ...[...new Set(ps.map(p=>p.c))].filter(c=>!CATS.includes(c))];
+  const lista = ps.filter(p=>S.cat==="Todos" || p.c===S.cat);
+  const anteriores = S.eventos.filter(e=>ehMensal(e) && e.id!==S.evId).sort((a,b)=>String(b.mes).localeCompare(String(a.mes)));
+  return `<div class="card" style="margin-top:0">
+      <div class="olho">${esc(S.evento.nome)}</div>
+      <h3 style="margin:2px 0 10px">Olá, ${esc(cli.nome||"cliente")}!</h3>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center">
+        <div><div class="olho">consumo</div><b style="font-size:18px">R$ ${fmt(conta.deve)}</b></div>
+        <div><div class="olho">pago</div><b style="font-size:18px;color:var(--verde)">R$ ${fmt(conta.pagou)}</b></div>
+        <div><div class="olho">a pagar</div><b style="font-size:18px;color:${conta.saldo>0.004?"var(--vermelho,#9a2a1a)":"var(--verde)"}">R$ ${fmt(Math.max(0,conta.saldo))}</b></div>
+      </div></div>
+    ${itens.length? `<div class="comanda">
+      <div class="comanda-topo"><span>🧾 Para lançar na sua conta</span><button class="bt bt-quieto bt-mini" data-acao="limpar">Limpar</button></div>
+      <div class="comanda-itens">${itens.map(([id,q])=>`<div class="carrinho-item">
+        <span style="flex:1;min-width:0">${esc(prod(id).n)}<span class="sub">R$ ${fmt(prod(id).p)} cada</span></span>
+        <span class="qtd"><button data-menos="${esc(id)}">−</button><b>${q}</b><button data-add="${esc(id)}">+</button></span>
+        <span class="val" style="width:74px;text-align:right">${fmt(prod(id).p*q)}</span></div>`).join("")}</div>
+      <div class="comanda-pe"><span class="barra-total">R$ ${fmt(total)}</span>
+        <button class="bt bt-ok" style="width:auto;flex:1" data-acao="cli-lancar">Lançar na minha conta</button></div></div>`
+      : `<div class="faixa" style="margin-bottom:10px"><b>Pegou alguma coisa?</b> Toque nos itens e depois em <b>Lançar na minha conta</b>. Errou? Dá para desfazer por ${DESFAZER_MIN} minutos.</div>`}
+    <div class="chips">${cats.map(c=>`<button class="chip" data-cat="${esc(c)}" ${c==="Todos"?"":`style="${estiloCat(c)}"`} aria-pressed="${S.cat===c}">${esc(c)}</button>`).join("")}</div>
+    <div class="grade">${lista.map(p=>{ const q = S.carrinho[p.id]||0;
+      return `<button class="prod ${q?"na-comanda":""}" data-add="${esc(p.id)}" style="${estiloCat(p.c)}">
+        ${q? `<span class="conta-qtd">${q}</span>`:""}<span class="cat">${esc(p.c)}</span><b>${esc(p.n)}</b><span>R$ ${fmt(p.p)}</span></button>`; }).join("")}</div>
+    <div class="card"><h3>🧾 Meus lançamentos<span class="sub-h">${conta.mov.length}</span></h3>${linhasMov(conta.mov, true)}</div>
+    ${blocoPixCliente(conta.saldo, S.evId)}
+    ${anteriores.length? `<div class="card"><h3>📅 Meses anteriores</h3><div class="lista">${anteriores.map(e=>`
+      <button class="conta" data-acao="cli-mes" data-ev="${esc(e.id)}"><span class="corpo"><span class="nome">${esc(nomeMes(e.mes))}</span>
+        <span class="sub">toque para ver o consumo</span></span><span class="saldo quite" style="font-size:18px;background:var(--latao-luz);color:var(--latao-sv)">›</span></button>`).join("")}</div></div>`:""}
+    <p class="nota" style="text-align:center;margin:14px 0 4px">${esc(org().nome||"")} · ${esc(PRODUTO.nome)}</p>`;
+}
+async function folhaMesCliente(evId){
+  const ev = S.eventos.find(e=>e.id===evId); if(!ev || !S.db) return;
+  folha(`<div class="olho">${esc(ev.nome)}</div><p class="nota" style="margin-top:10px">Carregando…</p>`);
+  try{
+    const snap = await S.db.collection("lanc").where("ev","==",evId).get();
+    const todos = []; snap.docs.forEach(d=>(d.data().itens||[]).forEach(x=>todos.push(x)));
+    const conta = contaEm(todos, meuCliente().slug);
+    folha(`<div class="olho">${esc(ev.nome)}</div>
+      <h2 style="font-family:var(--disp);font-size:24px;text-transform:uppercase;margin:4px 0 8px">${conta.saldo>0.004? "Falta pagar R$ "+fmt(conta.saldo) : "Mês pago ✓"}</h2>
+      <p class="nota">Consumo R$ ${fmt(conta.deve)} · pago R$ ${fmt(conta.pagou)}</p>
+      <div style="margin-top:10px">${linhasMov(conta.mov, false)}</div>
+      ${blocoPixCliente(conta.saldo, evId)}`);
+  }catch(e){ folha(`<p class="nota">Não consegui carregar agora. Confira a internet.</p>`); }
+}
+function linkConvite(cv){
+  const site = /^https?:/.test(location.href) ? location.origin + location.pathname : (PRODUTO.site||"");
+  return site + "#convite=" + cv.id + "&n=" + encodeURIComponent(LICENCA.nome||"") + "&k=" + (LICENCA.chave||"");
+}
+function msgConvite(cv){
+  const m = S.eventos.find(e=>e.id===(S.cfg&&S.cfg.evMensal));
+  return `Olá, ${cv.nome}! 🤠\n\nAgora você pode lançar o seu consumo do bar${org().nome? " do "+org().nome:""} pelo seu celular e acompanhar a conta do mês.\n\n1. Abra este link no Safari (iPhone) ou Chrome (Android):\n${linkConvite(cv)}\n2. Toque em Compartilhar > Adicionar à Tela de Início\n\nToda vez que pegar algo, toque no item e em "Lançar na minha conta". No fim do mês, dá para pagar pelo PIX ali mesmo.`;
+}
+function secMensal(){
+  if(!S.db) return `<div class="card"><h3>🏠 Bar mensal</h3><p class="nota">Para os clientes lançarem pelo próprio celular, a sincronização precisa estar ligada (Ajustes → Dados e backup).</p></div>`;
+  const mens = S.eventos.find(e=>e.id===(S.cfg&&S.cfg.evMensal));
+  if(!mens) return `<div class="card"><h3>🏠 Bar mensal</h3>
+    <p class="nota">Um bar que fica sempre aberto, separado dos eventos. Cada cliente convidado lança o próprio consumo pelo celular e acompanha a conta do mês. No fim do mês você fecha, cobra pelo WhatsApp e o mês seguinte começa zerado.</p>
+    <p class="nota" style="margin-top:8px">O cardápio começa igual ao do evento aberto; depois dá para ajustar.</p>
+    <div class="btns"><button class="bt bt-ouro" data-acao="mensal-ativar">Abrir o bar mensal de ${esc(nomeMes(hoje().slice(0,7)))}</button></div></div>`;
+  const noMensal = S.evId===mens.id;
+  const conv = (S.convites||[]).filter(c=>!c.revogado).sort((a,b)=>a.nome.localeCompare(b.nome,"pt-BR"));
+  const apDe = (slugC)=> (S.aparelhos||[]).filter(a=>a.cliente && a.cliSlug===slugC);
+  const avs = (S.avisos||[]).filter(a=>!a.visto).sort((a,b)=>b.ts-a.ts);
+  const anteriores = S.eventos.filter(e=>ehMensal(e) && e.id!==mens.id).sort((a,b)=>String(b.mes).localeCompare(String(a.mes)));
+  return `<div class="card" style="margin-top:0"><h3>🏠 ${esc(mens.nome)}</h3>
+      ${noMensal? `<div class="item"><span class="cresce">Consumo do mês</span><span class="val">R$ ${fmt(C.resumo.vendido)}</span></div>
+        <div class="item"><span class="cresce">A receber</span><span class="val">R$ ${fmt(C.resumo.aberto)}</span></div>
+        <div class="item"><span class="cresce">Clientes com consumo</span><span class="val">${C.contas.length}</span></div>`
+      : `<p class="nota">Este aparelho está trabalhando no evento. Para ver o consumo, as contas e cobrar, trabalhe no bar mensal.</p>`}
+      <div class="btns">
+        ${noMensal? `<button class="bt bt-quieto" data-acao="trabalhar" data-ev="${esc((S.cfg&&S.cfg.ev)||"")}">Voltar para o evento neste aparelho</button>`
+          : `<button class="bt bt-ouro" data-acao="trabalhar" data-ev="${esc(mens.id)}">Trabalhar no bar mensal neste aparelho</button>`}
+        <button class="bt bt-quieto" data-acao="mensal-fechar">Fechar ${esc(nomeMes(mens.mes))} e abrir ${esc(nomeMes(proxMes(mens.mes)))}</button>
+      </div>
+      <p class="nota">Os produtos e o PIX do bar mensal ficam em <b>Produtos e impressos</b> e <b>Evento</b>, enquanto este aparelho trabalha no bar mensal. Para cobrar, use a aba <b>Fiado</b> no bar mensal.</p>
+    </div>
+    ${avs.length? `<div class="card" style="border-color:var(--ambar)"><h3>💬 Avisos de pagamento<span class="sub-h">${avs.length}</span></h3>
+      ${avs.map(a=>`<div class="item" style="gap:8px;align-items:center"><span class="cresce"><b>${esc(a.cliNome||a.cli)}</b> · R$ ${fmt(a.valor)}
+        <span class="sub">${esc(a.evNome||"")} · ${esc(dataHora(a.ts))}</span></span>
+        <button class="bt bt-ok bt-mini" data-acao="aviso-baixa" data-id="${esc(a.id)}">Dar baixa</button>
+        <button class="bt bt-quieto bt-mini" data-acao="aviso-dispensa" data-id="${esc(a.id)}">✕</button></div>`).join("")}</div>`:""}
+    <div class="card"><h3>👥 Clientes com acesso pelo celular<span class="sub-h">${conv.length}</span></h3>
+      ${conv.map(c=>{ const aps = apDe(c.slug), ativo = aps.find(a=>(a.situacao||"ativo")==="ativo");
+        return `<div class="item" style="gap:8px;align-items:center"><span class="cresce"><b>${esc(c.nome)}</b>
+          <span class="sub">${ativo? "conectado · "+esc(ativo.modelo||"")+" · visto "+haQuanto(ativo.visto) : aps.length? "aparelho bloqueado" : "convite enviado, ainda não abriu"}${c.fone? " · "+esc(foneBR(c.fone)):""}</span></span>
+          <button class="bt bt-quieto bt-mini" data-acao="convite-enviar" data-id="${esc(c.id)}">Reenviar</button>
+          <button class="bt bt-perigo bt-mini" data-acao="convite-tirar" data-id="${esc(c.id)}">Tirar acesso</button></div>`; }).join("") || `<p class="nota">Nenhum cliente convidado ainda.</p>`}
+      <div class="campos" style="margin-top:12px">
+        <input class="campo" id="cv-nome" placeholder="Nome do cliente" list="cv-lista" autocomplete="off">
+        <datalist id="cv-lista">${S.pessoas.map(p=>`<option value="${esc(p.nome)}">`).join("")}</datalist>
+        <input class="campo" id="cv-fone" inputmode="tel" placeholder="WhatsApp com DDD">
+      </div>
+      <div class="btns"><button class="bt bt-ouro" data-acao="convite-criar">Convidar cliente</button></div>
+      <p class="nota">O convite chega pelo WhatsApp. O cliente abre o link e o celular dele já entra liberado, só com o próprio consumo — sem ver o de ninguém.</p>
+    </div>
+    ${anteriores.length? `<div class="card"><h3>📅 Meses fechados</h3><div class="lista">${anteriores.map(e=>`
+      <div class="item"><span class="cresce">${esc(e.nome)}</span><button class="bt bt-quieto bt-mini" data-acao="trabalhar" data-ev="${esc(e.id)}">abrir neste aparelho</button></div>`).join("")}</div>
+      <p class="nota">Abra um mês fechado para cobrar quem ainda deve.</p></div>`:""}`;
+}
+function folhaConvite(cv){
+  folha(`<div class="olho">Convite do bar mensal</div>
+    <h2 style="font-family:var(--disp);font-size:22px;text-transform:uppercase;margin:4px 0 8px">${esc(cv.nome)}</h2>
+    <p class="nota">Envie pelo WhatsApp. Quem abrir o link entra como <b>${esc(cv.nome)}</b> e só lança na conta dele.</p>
+    <div class="btns"><button class="bt bt-ok" data-acao="convite-zap" data-id="${esc(cv.id)}">Enviar no WhatsApp${cv.fone? " para "+esc(foneBR(cv.fone)):""}</button>
+      <button class="bt bt-quieto" data-copiar="${esc(linkConvite(cv))}" data-rotulo="Link do convite copiado">Copiar link</button></div>
+    <p class="nota" style="margin-top:8px">Não mande o link para outra pessoa: ele dá acesso à conta de ${esc(cv.nome)}.</p>`);
+}
+function barraEvento(){
+  if(!admin() || !S.cfg || !S.cfg.evMensal) return "";
+  const mens = S.eventos.find(e=>e.id===S.cfg.evMensal), evG = S.eventos.find(e=>e.id===S.cfg.ev && !ehMensal(e));
+  if(!mens) return "";
+  const noMensal = S.evId===S.cfg.evMensal;
+  return `<div class="chips" style="margin:0 0 10px">
+    ${evG? `<button class="chip" data-acao="trabalhar" data-ev="${esc(evG.id)}" aria-pressed="${!noMensal && S.evId===evG.id}">🎪 ${esc(evG.nome)}</button>`:""}
+    <button class="chip" data-acao="trabalhar" data-ev="${esc(mens.id)}" aria-pressed="${noMensal}">🏠 Bar mensal</button>
+  </div>`;
+}
+/* avisos "já paguei" do evento em uso, para o dono/gerente dar baixa */
+function cardAvisos(){
+  const av = (S.avisos||[]).filter(a=>!a.visto && a.ev===S.evId).sort((a,b)=>b.ts-a.ts);
+  if(!admin() || !av.length) return "";
+  return `<div class="card" style="border-color:var(--ambar)"><h3>💬 Avisos de pagamento<span class="sub-h">${av.length}</span></h3>
+    ${av.map(a=>`<div class="item" style="gap:8px;align-items:center"><span class="cresce"><b>${esc(a.cliNome||a.cli)}</b> avisou que pagou
+      <b>R$ ${fmt(a.valor)}</b><span class="sub">${esc(dataHora(a.ts))}</span></span>
+      <button class="bt bt-ok bt-mini" data-acao="aviso-baixa" data-id="${esc(a.id)}">Dar baixa</button>
+      <button class="bt bt-quieto bt-mini" data-acao="aviso-dispensa" data-id="${esc(a.id)}">✕</button></div>`).join("")}
+    <p class="nota">Confira o PIX no seu banco antes de dar baixa.</p></div>`;
+}
 function telaSemEvento(){
   if(!admin()) return `<div class="card"><div class="vazio">Nenhum evento aberto.<br>Peça para o responsável abrir o evento.</div></div>`;
-  const lista = S.eventos.map(e=>`<button class="conta" data-abrir-ev="${esc(e.id)}">
+  const lista = S.eventos.filter(e=>!ehMensal(e)).map(e=>`<button class="conta" data-abrir-ev="${esc(e.id)}">
       <span class="corpo"><span class="nome">${esc(e.nome)}</span>
       <span class="sub">${esc(periodo(e.ini,e.fim)||"sem data")}</span></span>
       <span class="saldo quite" style="font-size:14px;color:var(--latao-sv);background:var(--latao-luz)">abrir</span></button>`).join("");
@@ -3930,7 +4172,7 @@ function telaVender(){
   const itens = Object.entries(S.carrinho);
   const total = itens.reduce((s,[id,q])=>s+(prod(id).p*q),0);
   const n = itens.reduce((s,[,q])=>s+q,0);
-  return `${montarComanda(itens, total, n)}
+  return `${barraEvento()}${montarComanda(itens, total, n)}
     <div class="chips">${cats.map(c=>`<button class="chip" data-cat="${esc(c)}"
       ${c==="Todos"?"":`style="${estiloCat(c)}"`} aria-pressed="${S.cat===c}">${esc(c)}</button>`).join("")}</div>
     <div class="grade">
@@ -3970,7 +4212,7 @@ function telaContas(){
          <p class="nota">Abre um por um no WhatsApp, com a conta já escrita, e marca quem você já cobrou.</p>
          <div class="btns"><button class="bt bt-ok" data-acao="cobrar-todos">Cobrar os ${totalDev.length} devedores</button></div></div>`:""}`
     : `<div class="faixa">Procure o cliente para ver a conta dele e receber. O total do evento fica com o responsável.</div>`;
-  return `${topo}
+  return `${barraEvento()}${cardAvisos()}${topo}
     <div class="card">
       <h3>📒 Contas do evento<span class="sub-h">${lista.length} de ${C.contas.length}</span></h3>
       <input class="campo" id="in-busca" placeholder="🔍 Procurar cliente pelo nome..." value="${esc(S.busca)}" autocomplete="off">
@@ -4181,7 +4423,7 @@ function telaAjustes(){
         </span>
       </span></div>`;
   };
-  const outrosEv = S.eventos.filter(e=>e.id!==S.evId);
+  const outrosEv = S.eventos.filter(e=>e.id!==S.evId && !ehMensal(e));
   const voltar = `<button class="bt bt-quieto" data-acao="secao" data-secao="" style="margin:0 0 12px;width:auto;padding:0 14px">‹ Ajustes</button>`;
   const sec = S.secao||"";
   if(sec==="evento") return voltar + `<div class="card"><h3>Evento</h3>
@@ -4301,6 +4543,7 @@ function telaAjustes(){
         <button class="bt bt-quieto" data-acao="trocar-org">Usar outra licença (outro organizador)</button></div>
     </div>
     <p class="nota" style="text-align:center;margin:18px 0 6px">${esc(PRODUTO.nome)} · versão ${esc(PRODUTO.versao)}${PRODUTO.desenvolvedor? "<br>Desenvolvido por "+esc(PRODUTO.desenvolvedor):""}${PRODUTO.contato? " · "+esc(PRODUTO.contato):""}</p>`;
+  if(sec==="mensal") return voltar + secMensal();
   if(sec==="dados") return voltar + `${FIREBASE? `<div class="card"><h3>☁️ Sincronização</h3>
       <p class="nota">${S.db? "Ligada: todos os aparelhos ativados com a mesma licença veem as mesmas vendas, contas e cardápio em tempo real. Sem internet, continua vendendo e envia quando o sinal voltar."
         : "Desligada: os dados ficam só neste aparelho."}</p>
@@ -4327,6 +4570,8 @@ function telaAjustes(){
       ${itemSec("evento","🎪","Evento", esc([ev.nome, periodo(ev.ini,ev.fim)].filter(Boolean).join(" · "))+" · PIX, mensagem, outros eventos")}
       ${itemSec("cardapio","🍺","Produtos e impressos", `${prods.length} produto(s) · cardápio e fichas para imprimir`)}
       ${itemSec("clientes","👥","Clientes", `${S.pessoas.length} no cadastro`)}
+      ${itemSec("mensal","🏠","Bar mensal", (S.cfg&&S.cfg.evMensal)? esc(((S.eventos.find(e=>e.id===S.cfg.evMensal)||{}).nome||"aberto"))+" · "+((S.convites||[]).filter(c=>!c.revogado).length)+" cliente(s) com acesso" : "clientes lançam o próprio consumo pelo celular",
+        (S.avisos||[]).filter(a=>!a.visto).length? (S.avisos||[]).filter(a=>!a.visto).length+" aviso(s)" : "")}
       ${itemSec("aparelhos","📱","Aparelhos e equipe", S.db? `${nAp} aparelho(s) · senha do responsável` : "este aparelho · senha do responsável", nPend? nPend+" aguardando" : "")}
       ${itemSec("empresa","🏷","Minha empresa e licença", esc(LICENCA.nome||"")+" · "+(LICENCA.validade? "válida até "+esc(dataBR(LICENCA.validade)) : "vitalícia"))}
       ${itemSec("dados","☁️","Dados e backup", S.db? "sincronizado entre aparelhos · backup" : "só neste aparelho · backup")}
@@ -4562,7 +4807,33 @@ async function salvarEventoDoc(ev){
   const corpo = Object.assign({}, ev); delete corpo.id;
   return gravarNuvem(S.db.collection("eventos").doc(ev.id), corpo);
 }
+async function gravarEvento(ev){
+  const i = S.eventos.findIndex(e=>e.id===ev.id);
+  if(i>=0) S.eventos[i] = ev; else S.eventos.unshift(ev);
+  if(ev.id===S.evId) S.evento = ev;
+  if(!S.db){ guardar("local.eventos", S.eventos); return; }
+  S.eventosNovos = S.eventosNovos || {}; S.eventosNovos[ev.id] = ev;
+  const corpo = Object.assign({}, ev); delete corpo.id;
+  return gravarNuvem(S.db.collection("eventos").doc(ev.id), corpo);
+}
+const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+const nomeMes = (ym)=>{ const [y,m] = String(ym||"").split("-"); return (MESES[(+m||1)-1]||"")+"/"+y; };
+const proxMes = (ym)=>{ let [y,m] = ym.split("-").map(Number); m++; if(m>12){ m=1; y++; } return y+"-"+String(m).padStart(2,"0"); };
+const fimDoMes = (ym)=>{ const [y,m] = ym.split("-").map(Number); return ym+"-"+String(new Date(y, m, 0).getDate()).padStart(2,"0"); };
+async function abrirMensal(ym, base){
+  const b = base || S.eventos.find(e=>e.id===(S.cfg&&S.cfg.ev)) || S.evento || {};
+  const ev = {id:"mensal-"+ym+"-"+Math.random().toString(36).slice(2,6), tipo:"mensal", mes:ym,
+    nome:"Bar mensal · "+nomeMes(ym), ini:ym+"-01", fim:fimDoMes(ym),
+    pix:b.pix||"", pixNome:b.pixNome||"", pixCidade:b.pixCidade||"", pixCodigo:b.pixCodigo||"",
+    logo:b.logo||"", mensagem:b.mensagem||"", semFone:b.semFone, mostrarPix:b.mostrarPix,
+    produtos: JSON.parse(JSON.stringify((b.produtos&&b.produtos.length)? b.produtos : cardapioPadrao())), criadoEm:Date.now()};
+  await gravarEvento(ev);
+  S.cfg = Object.assign({}, S.cfg, {evMensal:ev.id}); salvarCfg();
+  reavaliarEvento();
+  return ev;
+}
 async function definirEventoAtual(id){
+  guardar("evLocal", "");
   S.cfg = Object.assign({}, S.cfg, {ev:id});
   salvarCfg(); entrarNoEvento(id);
 }
@@ -4646,21 +4917,30 @@ const MANUAL = [
       "Digite o nome. Cliente com conta no evento: lançar. Cliente de eventos anteriores: usar (o telefone vem junto). Cliente novo: Abrir conta, com WhatsApp e DDD."],
    b:["Na aba Fiado, ordene por Maior dívida ou A > Z e toque no nome para receber, enviar a conta no WhatsApp ou baixar o PDF.",
       "No fim do evento, toque em Cobrar os devedores: abre um por um no WhatsApp com a conta escrita."]},
-  {h:"6. Estoque", p:["Opcional. Na aba Estoque, toque no produto, informe a quantidade que entrou, o custo por unidade e quando avisar. O saldo baixa a cada venda e o sistema avisa quando está acabando. O lucro bruto considera os produtos com custo cadastrado."]},
-  {h:"7. Relatórios e fechamento", b:["Resumo: total vendido, dinheiro em caixa, fiado em aberto, lucro e formas de pagamento.",
+  {h:"6. Bar mensal: clientes lançam pelo celular", p:["Um bar que fica sempre aberto, separado dos eventos, para os clientes da casa. Cada cliente convidado lança o próprio consumo e acompanha a conta do mês."],
+   n:["Em Ajustes > Bar mensal, toque em Abrir o bar mensal.",
+      "Em Convidar cliente, digite o nome e o WhatsApp e envie o convite. O cliente abre o link e o celular dele já entra liberado, só com a conta dele.",
+      "O cliente toca no que pegou e em Lançar na minha conta. Errou? Dá para desfazer por 10 minutos.",
+      "Ele acompanha o consumo, paga pelo PIX com o QR já no valor e toca em Já paguei. O aviso chega para você dar baixa.",
+      "No fim do mês, toque em Fechar o mês: o mês seguinte começa zerado e o fechado fica guardado para cobrar quem deve."],
+   b:["Para ver as contas e cobrar, toque em Bar mensal no alto da tela de vendas ou do Fiado: só o seu aparelho muda, os outros continuam no evento.",
+      "Um aparelho de balcão pode vender direto no bar mensal: em Aparelhos e equipe, toque em Vender no bar mensal.",
+      "Tirar acesso: trava na hora o celular do cliente; o que ele já lançou continua na conta."]},
+  {h:"7. Estoque", p:["Opcional. Na aba Estoque, toque no produto, informe a quantidade que entrou, o custo por unidade e quando avisar. O saldo baixa a cada venda e o sistema avisa quando está acabando. O lucro bruto considera os produtos com custo cadastrado."]},
+  {h:"8. Relatórios e fechamento", b:["Resumo: total vendido, dinheiro em caixa, fiado em aberto, lucro e formas de pagamento.",
       "Vendas: mais vendidos, por posto e por hora.", "Clientes: quem mais consumiu e lista de cobrança.",
       "Movimento: últimos lançamentos, com cancelamento.", "Eventos: comparativo dos eventos já feitos."],
    p:["No fim de cada dia, gere o PDF Relatório completo, com espaço para assinatura de quem fechou e de quem conferiu."]},
-  {h:"8. Aparelhos: dono, gerentes e bloqueio", b:["Dono: vê todas as abas, libera e bloqueia qualquer aparelho, cria gerentes e pode passar o papel de dono. Ninguém consegue bloqueá-lo.",
+  {h:"9. Aparelhos: dono, gerentes e bloqueio", b:["Dono: vê todas as abas, libera e bloqueia qualquer aparelho, cria gerentes e pode passar o papel de dono. Ninguém consegue bloqueá-lo.",
       "Gerente: vê todas as abas e libera ou bloqueia os aparelhos comuns.", "Comum: só a aba Vender (inclusive lançar no fiado).",
       "Aparelho novo precisa da minha liberação: com SIM, um celular novo só vende depois de liberado.",
       "Bloquear todos os outros: no fim do evento, trava de uma vez os aparelhos comuns.",
       "Passar dono: para trocar de celular, libere o novo e toque em Passar dono nele."],
    p:["Tudo isso fica em Ajustes > Aparelhos e equipe. Não passe a senha do responsável para quem só vende."]},
-  {h:"9. Internet, sincronização e backup", b:["sincronizado: tudo enviado.", "N por enviar: vendas guardadas esperando sinal; envia sozinho.",
+  {h:"10. Internet, sincronização e backup", b:["sincronizado: tudo enviado.", "N por enviar: vendas guardadas esperando sinal; envia sozinho.",
       "sem internet · salvando: continue vendendo normalmente.", "conectando...: aguarde alguns segundos."],
    p:["Antes de fechar o caixa, espere todos os celulares mostrarem sincronizado. No fim de cada evento, baixe o backup em Ajustes > Backup."]},
-  {h:"10. Licença e problemas comuns", b:["Chave não confere: confira se o nome está exatamente como foi enviado.",
+  {h:"11. Licença e problemas comuns", b:["Chave não confere: confira se o nome está exatamente como foi enviado.",
       "Celulares não sincronizam: abra pelo ícone da tela inicial ou pelo navegador, nunca pelo WhatsApp, e use o mesmo nome e chave.",
       "Versão nova não aparece: feche o app e abra de novo.",
       "Renovação: faltando 15 dias o sistema avisa. Com a chave nova, use Ajustes > Licença > Renovar / trocar chave."]}
@@ -5495,6 +5775,8 @@ document.addEventListener("click", async (e)=>{
     const ap = (S.aparelhos||[]).find(x=>x.id===id); const nome = esc((ap&&ap.posto)||"sem nome");
     if(id===S.dev) return;
     if(ap && ap.principal){ aviso("<b>Aparelho do dono</b>Ninguém mexe nele", 4000); return; }
+    if(op==="local"){ refAparelho(id).set({local: (ap && ap.local==="mensal")? "" : "mensal"}, {merge:true}).catch(()=>{});
+      aviso("<b>"+nome+"</b>"+((ap && ap.local==="mensal")? "volta a vender no evento" : "passa a vender no bar mensal")); return; }
     if(op==="passardono"){
       if(!souPrincipal()){ aviso("<b>Só o dono</b>pode passar o papel de dono", 4000); return; }
       confirmar("Passar dono", `<b>${nome}</b> vira o novo dono: libera, bloqueia e cria gerentes.<br><br>Este aparelho deixa de ser dono e vira um aparelho comum. O novo dono pode bloqueá-lo ou removê-lo depois.`, "Passar dono", "appassa:"+id, true); return; }
@@ -5524,6 +5806,19 @@ document.addEventListener("click", async (e)=>{
     if(tipo==="aprem"){ refAparelho(valor).delete().catch(()=>{}); aviso("<b>Removido da lista</b>"); }
     if(tipo==="apbloqtodos"){ (S.aparelhos||[]).filter(x=>x.id!==S.dev && !x.gerente && (x.situacao||"ativo")!=="bloqueado")
       .forEach(x=>refAparelho(x.id).set({situacao:"bloqueado"}, {merge:true}).catch(()=>{})); aviso("<b>Todos os outros bloqueados</b>"); }
+    if(tipo==="mensalfecha"){
+      const mens = S.eventos.find(e=>e.id===valor); if(!mens) return;
+      const velho = Object.assign({}, mens, {fechado:true}); await gravarEvento(velho);
+      const novo = await abrirMensal(proxMes(mens.mes), mens);
+      fechaFolha(); aviso("<b>"+esc(nomeMes(mens.mes))+" fechado</b>"+esc(novo.nome)+" aberto", 5000); desenhar(); return;
+    }
+    if(tipo==="convtira"){
+      const cv = (S.convites||[]).find(c=>c.id===valor); if(!cv) return;
+      const corpo = Object.assign({}, cv, {revogado:true, revogadoEm:Date.now()}); delete corpo.id;
+      gravarNuvem(S.db.collection("convites").doc(cv.id), corpo);
+      (S.aparelhos||[]).filter(x=>x.cliente && x.cliSlug===cv.slug).forEach(x=>refAparelho(x.id).set({situacao:"bloqueado"}, {merge:true}).catch(()=>{}));
+      fechaFolha(); aviso("<b>Acesso retirado</b>"+esc(cv.nome)); desenhar(); return;
+    }
     if(tipo==="cancelar"){ lancar({tipo:"cancelamento", alvo:valor, total:0}); aviso("<b>Lançamento cancelado</b>"); }
     if(tipo==="tira"){ const ev = JSON.parse(JSON.stringify(S.evento));
       ev.produtos = (ev.produtos||[]).filter(x=>x.id!==valor); await salvarEventoDoc(ev); }
@@ -5600,6 +5895,77 @@ document.addEventListener("click", async (e)=>{
         refAparelho().set({situacao:"ativo", visto:Date.now()}, {merge:true}).catch(()=>{});
         S.devSit = "ativo"; desenhar(); aviso("<b>Aparelho liberado</b>");
       } else aviso("<b>Senha errada</b>"+(!(S.cfg&&S.cfg.pin)? "Nenhuma senha definida":""), 3000);
+      return;
+    }
+    if(a==="cli-lancar"){
+      const cli = meuCliente(); if(!cli.slug || !S.evento) return;
+      const itens = Object.entries(S.carrinho).map(([id,q])=>({id, n:prod(id).n, p:prod(id).p, q, c:prod(id).c}));
+      const total = itens.reduce((s,i)=>s+i.p*i.q,0); if(!itens.length) return;
+      if(!S.clientes.some(c=>c.slug===cli.slug)){ const pe = S.pessoas.find(x=>x.slug===cli.slug)||{}; salvarCliente({slug:cli.slug, nome:cli.nome, fone:pe.fone||""}); }
+      lancar({tipo:"venda", itens, total, forma:"fiado", cli:cli.slug, cliNome:cli.nome, auto:true});
+      S.carrinho = {}; desenhar();
+      aviso(`<b>Lançado na sua conta</b>R$ ${fmt(total)} · dá para desfazer por ${DESFAZER_MIN} min`, 3500); return;
+    }
+    if(a==="cli-desfaz"){
+      const reg = C.validos.find(x=>x.id===el.dataset.id);
+      if(!reg || reg.dev!==S.dev || (Date.now()-reg.ts) >= DESFAZER_MIN*60000){ aviso("<b>Não dá mais para desfazer</b>Fale com o responsável"); desenhar(); return; }
+      lancar({tipo:"cancelamento", alvo:reg.id, total:0, auto:true}); aviso("<b>Lançamento desfeito</b>"); return;
+    }
+    if(a==="cli-mes"){ folhaMesCliente(el.dataset.ev); return; }
+    if(a==="cli-paguei"){
+      const v = parseFloat(el.dataset.v)||0, evId = el.dataset.ev;
+      folha(`<div class="olho">Aviso de pagamento</div>
+        <h2 style="font-family:var(--disp);font-size:22px;text-transform:uppercase;margin:4px 0 8px">Já paguei</h2>
+        <p class="nota">O responsável recebe o aviso, confere o PIX e dá baixa na sua conta.</p>
+        <label class="rot" for="pg-valor" style="margin-top:12px;display:block">Valor pago</label>
+        <input class="campo" id="pg-valor" inputmode="decimal" value="${fmt(v)}">
+        <div class="btns"><button class="bt bt-ok" data-acao="cli-paguei-envia" data-ev="${esc(evId)}">Enviar aviso</button></div>`); return;
+    }
+    if(a==="cli-paguei-envia"){
+      const cli = meuCliente(), evId = el.dataset.ev, ev = S.eventos.find(e=>e.id===evId)||{};
+      const v = parseFloat(String($("pg-valor").value||"").replace(/\./g,"").replace(",","."));
+      if(!(v>0)){ aviso("<b>Digite o valor pago</b>"); return; }
+      if(!S.db){ aviso("<b>Sem conexão</b>"); return; }
+      gravarNuvem(S.db.collection("avisos").doc("av"+novoId()), {cli:cli.slug, cliNome:cli.nome, ev:evId, evNome:ev.nome||"", valor:v, ts:Date.now(), dev:S.dev, visto:false});
+      fechaFolha(); desenhar(); aviso("<b>Aviso enviado</b>Obrigado!", 3500); return;
+    }
+    if(a==="trabalhar"){ trabalharEm(el.dataset.ev||""); aviso("<b>Trabalhando em</b>"+esc((S.evento&&S.evento.nome)||"")); return; }
+    if(a==="mensal-ativar"){ const ev = await abrirMensal(hoje().slice(0,7)); aviso("<b>Bar mensal aberto</b>"+esc(ev.nome), 4000); desenhar(); return; }
+    if(a==="mensal-fechar"){
+      const mens = S.eventos.find(e=>e.id===(S.cfg&&S.cfg.evMensal)); if(!mens) return;
+      confirmar("Fechar o mês", `<b>${esc(mens.nome)}</b> fica guardado para cobrar quem ainda deve.<br><br>Os clientes passam a lançar em <b>${esc(nomeMes(proxMes(mens.mes)))}</b>, que começa zerado e com o mesmo cardápio.`,
+        "Fechar e abrir "+nomeMes(proxMes(mens.mes)), "mensalfecha:"+mens.id, false); return;
+    }
+    if(a==="convite-criar"){
+      const nome = ($("cv-nome").value||"").trim().replace(/\s+/g," "), fone = ($("cv-fone").value||"").replace(/\D/g,"");
+      if(!nome){ aviso("<b>Digite o nome do cliente</b>"); return; }
+      const sl = slug(nome); const pe = S.pessoas.find(x=>x.slug===sl);
+      const fon = fone || (pe&&pe.fone) || "";
+      salvarPessoa({slug:sl, nome: pe? pe.nome : nome, fone:fon});
+      const exist = (S.convites||[]).find(c=>c.slug===sl && !c.revogado);
+      const cv = exist || {id:"cv"+novoId().replace(/[^A-Za-z0-9]/g,"")+Math.random().toString(36).slice(2,8), slug:sl, nome: pe? pe.nome : nome, fone:fon, criado:Date.now(), revogado:false};
+      if(!exist){ S.convites = (S.convites||[]).concat([cv]); const corpo = Object.assign({}, cv); delete corpo.id; gravarNuvem(S.db.collection("convites").doc(cv.id), corpo); }
+      folhaConvite(cv); desenhar(); return;
+    }
+    if(a==="convite-enviar"){ const cv = (S.convites||[]).find(c=>c.id===el.dataset.id); if(cv) folhaConvite(cv); return; }
+    if(a==="convite-zap"){
+      const cv = (S.convites||[]).find(c=>c.id===el.dataset.id); if(!cv) return;
+      const f = String(cv.fone||"").replace(/\D/g,""); const num = f? (f.length<=11? "55"+f : f) : "";
+      window.open("https://wa.me/"+num+"?text="+encodeURIComponent(msgConvite(cv)), "_blank"); return;
+    }
+    if(a==="convite-tirar"){
+      const cv = (S.convites||[]).find(c=>c.id===el.dataset.id); if(!cv) return;
+      confirmar("Tirar acesso", `<b>${esc(cv.nome)}</b> deixa de lançar pelo celular. O que ele já lançou continua na conta.`, "Tirar acesso", "convtira:"+cv.id, true); return;
+    }
+    if(a==="aviso-dispensa"){ const av = (S.avisos||[]).find(x=>x.id===el.dataset.id); if(!av) return;
+      const corpo = Object.assign({}, av, {visto:true}); delete corpo.id; gravarNuvem(S.db.collection("avisos").doc(av.id), corpo); return; }
+    if(a==="aviso-baixa"){
+      const av = (S.avisos||[]).find(x=>x.id===el.dataset.id); if(!av) return;
+      if(S.evId!==av.ev) trabalharEm(av.ev);
+      const corpo = Object.assign({}, av, {visto:true}); delete corpo.id;
+      gravarNuvem(S.db.collection("avisos").doc(av.id), corpo);
+      S.aba = "contas"; desenhar();
+      setTimeout(()=>{ if(C.contas.some(c=>c.slug===av.cli)) folhaReceber(av.cli, av.valor); else aviso("<b>Conta não encontrada</b>Abra o mês certo no Fiado", 4000); }, 300);
       return;
     }
     if(a==="secao"){ S.secao = el.dataset.secao||""; desenhar(); try{ window.scrollTo(0,0); }catch(e){} return; }
@@ -5767,6 +6133,18 @@ desenhar();
 if(S.travado) S.aba = "vender";
 /* link de ativação: ...#ativar=NOME&chave=XXXXX-... */
 function lerLinkAtivacao(){
+  const cv = (location.hash||"").match(/^#convite=([A-Za-z0-9]+)&n=([^&]*)&k=([A-Za-z0-9-]+)/);
+  if(cv){
+    try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
+    let nome = cv[2]; try{ nome = decodeURIComponent(nome.replace(/\+/g," ")); }catch(e){}
+    const r = LIC.conferir(nome, cv[3]);
+    if(!r.ok){ setTimeout(()=>aviso("<b>Link de convite inválido</b>Peça um novo ao responsável", 6000), 600); return false; }
+    S.convite = cv[1]; guardar("convite", cv[1]);
+    const atual = lembrar("licenca", null);
+    if(atual && LICENCA.ok && LIC.normNome(atual.nome)!==LIC.normNome(nome)){ trocarLicenca(nome, r.chave); return "convite"; }
+    if(!LICENCA.ok){ guardar("licenca", {nome, chave:r.chave}); lerLicenca(); }
+    return "convite";
+  }
   const m = (location.hash||"").match(/^#ativar=([^&]*)&chave=([A-Za-z0-9-]+)/);
   if(!m) return false;
   try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
@@ -5787,10 +6165,12 @@ function perguntarLinkAtivacao(){
     <div class="btns"><button class="bt bt-ouro" data-acao="ativar-link">${mesmo? "Atualizar chave" : "Trocar para "+esc(L.nome)}</button>
     <button class="bt bt-quieto" data-fechar>${mesmo? "Agora não" : "Manter "+esc(LICENCA.nome)}</button></div>`);
 }
+S.convite = lembrar("convite", "") || null;
 lerLinkAtivacao();
 iniciarDados();
 if(S.linkLic && LICENCA.ok) setTimeout(perguntarLinkAtivacao, 500);
-window.addEventListener("hashchange", ()=>{ if(lerLinkAtivacao()) perguntarLinkAtivacao(); });
+window.addEventListener("hashchange", ()=>{ const r = lerLinkAtivacao(); if(r==="convite"){ iniciarDados(); desenhar(); } else if(r) perguntarLinkAtivacao(); });
+if(S.convite) guardar("boasVindas", "");
 if(LICENCA.ok && lembrar("boasVindas", "")){ const n = lembrar("boasVindas",""); guardar("boasVindas",""); setTimeout(()=>boasVindas(n), 700); }
 document.addEventListener("change", async (e)=>{
   const inp = e.target && e.target.closest && e.target.closest("input[data-logo]");

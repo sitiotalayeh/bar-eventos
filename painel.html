@@ -163,7 +163,7 @@ const logado = ()=>{ const u = auth.currentUser; return !!(u && !u.isAnonymous &
 const col = db.collection("licencas");
 let lista = [], filtro = "todas", busca = "", parar = null, erroLista = "";
 const apsAbertos = {}, apsDados = {};   /* conta -> unsubscribe / lista de aparelhos */
-function papelAp(x){ return x.principal? "dono" : x.gerente? "gerente" : "comum"; }
+function papelAp(x){ return x.cliente? "cliente" : x.principal? "dono" : x.gerente? "gerente" : "comum"; }
 function htmlAps(conta){
   const aps = apsDados[conta];
   if(!aps) return "Carregando…";
@@ -179,10 +179,10 @@ function htmlAps(conta){
       </div>
       <div class="nota">${esc(x.modelo||"")} · visto ${quando(x.visto)}</div>
       <div class="acoes" style="margin-top:6px;align-items:center">
-        <span class="nota" style="font-weight:600">Função:</span>
+        ${x.cliente? `<span class="nota" style="font-weight:600">Cliente do bar mensal: ${esc(x.cliNome||"")}</span>` : `<span class="nota" style="font-weight:600">Função:</span>
         <select data-ap-papel style="width:auto;padding:7px 8px;font-size:13px;border-radius:9px">
           ${[["dono","Dono"],["gerente","Gerente"],["comum","Comum (só vende)"]].map(([k,n])=>`<option value="${k}" ${k===pp?"selected":""}>${n}</option>`).join("")}
-        </select>
+        </select>`}
         ${sit!=="ativo"? `<button class="verde" data-a="ap-liberar">Liberar</button>`:""}
         ${sit!=="bloqueado"? `<button class="perigo" data-a="ap-bloquear">Bloquear</button>`:""}
         <button data-a="ap-excluir">Excluir</button>
