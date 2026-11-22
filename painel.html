@@ -156,8 +156,10 @@ function folha(html){ $("folha").innerHTML = html; $("fundo").classList.add("abe
 function fecha(){ $("fundo").classList.remove("aberto"); }
 $("fundo").addEventListener("click", e=>{ if(e.target.id==="fundo") fecha(); });
 
-firebase.initializeApp(FIREBASE);
-const auth = firebase.auth(), db = firebase.firestore();
+/* app separado ("painel"): o login do painel não se mistura com o login anônimo do sistema do bar no mesmo site */
+const appPainel = firebase.initializeApp(FIREBASE, "painel");
+const auth = appPainel.auth(), db = appPainel.firestore();
+const logado = ()=>{ const u = auth.currentUser; return !!(u && !u.isAnonymous && u.email); };
 const col = db.collection("licencas");
 let lista = [], filtro = "todas", busca = "", parar = null, erroLista = "";
 const apsAbertos = {}, apsDados = {};   /* conta -> unsubscribe / lista de aparelhos */
@@ -239,10 +241,11 @@ function telaLogin(msg){
     <label for="em">E-mail</label><input id="em" type="email" autocomplete="username">
     <label for="se">Senha</label><input id="se" type="password" autocomplete="current-password">
     ${msg? `<div class="erro">${esc(msg)}</div>`:""}
-    <button class="forte cheio" data-a="entrar">Entrar</button></div>`;
+    <button class="forte cheio" data-a="entrar">Entrar</button>
+    <button class="cheio" style="margin-top:8px;background:transparent;border:0;color:var(--latao);text-decoration:underline" data-a="esqueci">Esqueci minha senha</button></div>`;
 }
 function desenhar(){
-  if(!auth.currentUser) return;
+  if(!logado()) return;
   $("sair").hidden = false;
   const conta = {todas:0, ativas:0, suspensas:0, vencidas:0};
   lista.forEach(l=>{ conta.todas++; const s=situacao(l).t; if(s==="suspensa") conta.suspensas++; else if(s==="vencida") conta.vencidas++; else conta.ativas++; });
@@ -304,7 +307,10 @@ function assinar(){
     lista = []; desenhar();
   });
 }
-auth.onAuthStateChanged(u=>{ if(u){ desenhar(); assinar(); } else { if(parar){ parar(); parar=null; } telaLogin(); } });
+auth.onAuthStateChanged(u=>{
+  if(u && !u.isAnonymous && u.email){ desenhar(); assinar(); }
+  else { if(parar){ parar(); parar=null; } Object.keys(apsAbertos).forEach(fecharAps); telaLogin(); }
+});
 
 /* ───── formulários ───── */
 function formLicenca(titulo, l, botao, acao){
@@ -373,6 +379,15 @@ document.addEventListener("click", async (e)=>{
       telaLogin(/network/.test(c)? "Sem conexão. Abra pelo Safari ou Chrome, não pelo visualizador de arquivos."
         : /operation-not-allowed/.test(c)? "Ative o login por E-mail/senha no Firebase (Authentication → Método de login)."
         : "E-mail ou senha incorretos."); }
+    return;
+  }
+  if(a==="esqueci"){
+    const em = ($("em").value||"").trim();
+    if(!em){ telaLogin("Digite o seu e-mail no campo acima e toque de novo em Esqueci minha senha."); return; }
+    el.disabled = true;
+    try{ await auth.sendPasswordResetEmail(em); }catch(err){}
+    telaLogin(""); $("em").value = em;
+    aviso("Se esse e-mail for o do painel, chega uma mensagem com o link para criar uma senha nova. Confira também a caixa de spam.", 6500);
     return;
   }
   if(a==="nova"){ formLicenca("Nova licença", {novaVal:somaMeses(12)}, "Gerar chave e salvar", "salvar-nova"); return; }
