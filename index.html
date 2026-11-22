@@ -3192,11 +3192,11 @@ const CARDAPIO = [
   {n:"Geladinho", p:8, c:"Doces"},
   {n:"Gelo 5 kg", p:15, c:"Outros"},
   {n:"Feno Tifton 85", p:50, c:"Outros"},
-  {n:"Ficha GTA", p:40, c:"Fichas"},
-  {n:"Ficha Piquetão", p:150, c:"Fichas"},
-  {n:"Ficha Baia", p:100, c:"Fichas"},
-  {n:"Ficha Baia de Ferro", p:50, c:"Fichas"},
-  {n:"Ficha Alfafa", p:100, c:"Fichas"}
+  {n:"GTA", p:40, c:"Outros"},
+  {n:"Piquetão", p:150, c:"Outros"},
+  {n:"Baia", p:100, c:"Outros"},
+  {n:"Baia de Ferro", p:50, c:"Outros"},
+  {n:"Alfafa", p:100, c:"Outros"}
 ];
 /* ---------- PIX: código copia e cola e QR Code ---------- */
 function crc16(txt){
@@ -3257,7 +3257,7 @@ function qrDataUrl(texto, escala){
 }
 const temPixDinamico = ()=> !!(S.evento && S.evento.pix) && !(S.evento.pixCodigo && S.evento.pixCodigo.length>30);
 
-const CATS = ["Fichas","Bebidas","Churrasco","Combo","Doces","Outros"];
+const CATS = ["Bebidas","Churrasco","Combo","Doces","Outros"];
 /* cada categoria com a sua cor, na tela de vendas e nos relatórios */
 const CORES = {
   "fichas":    ["#B07D16","#FBF1D8"],
@@ -3899,7 +3899,7 @@ function telaPosto(){
 }
 function produtosAtivos(){
   const ps = ((S.evento&&S.evento.produtos)||[]).filter(p=>p.ativo!==false);
-  return S.evento&&S.evento.fichasPrimeiro ? ps.filter(p=>p.c==="Fichas").concat(ps.filter(p=>p.c!=="Fichas")) : ps;
+  return ps;
 }
 function montarComanda(itens, total, n){
   if(!n) return `<div class="faixa" style="margin-bottom:10px">
@@ -4165,16 +4165,21 @@ function telaAjustes(){
   const fichas = prods.filter(p=>p.c==="Fichas"), outros = prods.filter(p=>p.c!=="Fichas");
   const linha = (p, lista)=>{
     const i = lista.indexOf(p);
-    return `<div class="item" style="${p.ativo===false?"opacity:.45":""}">
-      <span style="display:flex;flex-direction:column;gap:2px">
-        <button class="bt bt-quieto bt-mini" data-sobe="${esc(p.id)}" ${i===0?"disabled":""}>▲</button>
-        <button class="bt bt-quieto bt-mini" data-desce="${esc(p.id)}" ${i===lista.length-1?"disabled":""}>▼</button>
+    return `<div class="item" style="align-items:stretch;gap:8px;${p.ativo===false?"opacity:.45":""}">
+      <span style="display:flex;flex-direction:column;gap:4px;justify-content:center">
+        <button class="bt bt-quieto bt-mini" data-sobe="${esc(p.id)}" ${i===0?"disabled":""} aria-label="Subir">▲</button>
+        <button class="bt bt-quieto bt-mini" data-desce="${esc(p.id)}" ${i===lista.length-1?"disabled":""} aria-label="Descer">▼</button>
       </span>
-      <span class="cresce"><input class="campo" style="padding:8px" value="${esc(p.n)}" data-nome="${esc(p.id)}">
-        <span class="sub">${esc(p.c)}</span></span>
-      <input class="campo" style="width:84px;text-align:right;padding:8px" inputmode="decimal" value="${p.p}" data-preco="${esc(p.id)}">
-      <button class="bt bt-quieto bt-mini" data-liga="${esc(p.id)}">${p.ativo===false?"○":"●"}</button>
-      <button class="bt bt-quieto bt-mini" data-tira="${esc(p.id)}">✕</button></div>`;
+      <span class="cresce" style="display:flex;flex-direction:column;gap:6px;min-width:0">
+        <input class="campo" style="padding:8px;width:100%" value="${esc(p.n)}" data-nome="${esc(p.id)}" aria-label="Nome">
+        <span style="display:flex;gap:6px;align-items:center">
+          <select class="campo" style="padding:6px 8px;font-size:13px;flex:1;min-width:0" data-catp="${esc(p.id)}" aria-label="Categoria">
+            ${CATS.concat(CATS.includes(p.c)?[]:[p.c]).map(c=>`<option ${c===p.c?"selected":""}>${esc(c)}</option>`).join("")}</select>
+          <input class="campo" style="width:78px;text-align:right;padding:6px 8px" inputmode="decimal" value="${p.p}" data-preco="${esc(p.id)}" aria-label="Valor">
+          <button class="bt bt-quieto bt-mini" data-liga="${esc(p.id)}" aria-label="${p.ativo===false?"Mostrar na venda":"Esconder da venda"}">${p.ativo===false?"○":"●"}</button>
+          <button class="bt bt-quieto bt-mini" data-tira="${esc(p.id)}" aria-label="Apagar">✕</button>
+        </span>
+      </span></div>`;
   };
   const outrosEv = S.eventos.filter(e=>e.id!==S.evId);
   const voltar = `<button class="bt bt-quieto" data-acao="secao" data-secao="" style="margin:0 0 12px;width:auto;padding:0 14px">‹ Ajustes</button>`;
@@ -4223,32 +4228,26 @@ function telaAjustes(){
     </div>
 
     `;
-  if(sec==="cardapio") return voltar + `<div class="card"><h3>Produtos</h3>
-      ${outros.map(p=>linha(p,outros)).join("") || `<p class="nota">Nenhum produto cadastrado.</p>`}
-      <div class="campos" style="margin-top:10px">
+  if(sec==="cardapio"){
+    const ordemCats = CATS.concat([...new Set(prods.map(p=>p.c))].filter(c=>!CATS.includes(c)));
+    const grupos = ordemCats.map(c=>({c, itens:prods.filter(p=>p.c===c)})).filter(g=>g.itens.length);
+    return voltar + `<div class="card"><h3>Produtos<span class="sub-h">${prods.length} produto(s)</span></h3>
+      <p class="nota">Tudo o que se vende fica aqui. Todo produto cadastrado também pode ser impresso como ficha para recorte, no card <b>Impressos</b> logo abaixo. Toque no nome ou no valor para alterar, ▲▼ para ordenar, ● para esconder da venda sem apagar.</p>
+      <div class="campos" style="margin-top:12px">
         <input class="campo" id="pr-nome" placeholder="Nome do produto">
         <div class="linha-campos">
-          <select class="campo" id="pr-cat">${CATS.filter(c=>c!=="Fichas").map(c=>`<option>${c}</option>`).join("")}</select>
+          <select class="campo" id="pr-cat">${CATS.map(c=>`<option ${c==="Bebidas"?"selected":""}>${c}</option>`).join("")}</select>
           <input class="campo" id="pr-valor" inputmode="decimal" placeholder="Valor">
         </div>
       </div>
-      <div class="btns"><button class="bt bt-quieto" data-acao="add-produto">Criar produto</button>
-        <button class="bt bt-quieto" data-acao="cardapio-padrao">Restaurar cardápio padrão</button></div>
-    </div>
-
-    <div class="card"><h3>Fichas</h3>
-      <button class="bt bt-quieto" data-acao="fichas-primeiro" style="justify-content:space-between">
-        <span>Fichas primeiro na tela de vendas</span><span>${ev.fichasPrimeiro?"SIM":"não"}</span></button>
-      <div style="margin-top:8px">${fichas.map(p=>linha(p,fichas)).join("") || `<p class="nota">Nenhuma ficha cadastrada.</p>`}</div>
-      <div class="linha-campos" style="margin-top:10px">
-        <input class="campo" id="fi-nome" placeholder="Nome da ficha">
-        <input class="campo" id="fi-valor" inputmode="decimal" placeholder="Valor">
-      </div>
-      <div class="btns"><button class="bt bt-quieto" data-acao="add-ficha">Criar ficha</button></div>
+      <div class="btns"><button class="bt bt-ouro" data-acao="add-produto">Cadastrar</button></div>
+      ${grupos.map(g=>`<div style="margin-top:14px"><div class="olho" style="margin-bottom:4px">${esc(g.c)} · ${g.itens.length}</div>
+        ${g.itens.map(p=>linha(p, g.itens)).join("")}</div>`).join("") || `<p class="nota" style="margin-top:10px">Nenhum produto cadastrado.</p>`}
+      <div class="btns" style="margin-top:14px"><button class="bt bt-quieto" data-acao="cardapio-padrao">Restaurar cardápio padrão</button></div>
     </div>
 
     <div class="card"><h3>🖨 Impressos do evento</h3>
-      <p class="nota">PDFs prontos para imprimir, com as logos, os itens e os valores deste evento.</p>
+      <p class="nota">PDFs prontos para imprimir, com as logos, os produtos e os valores deste evento. Nas fichas, você escolhe quantas de cada produto.</p>
       <div class="btns">
         <button class="bt bt-quieto" data-acao="pdf-cardapio">Cardápio com QR do PIX</button>
         <button class="bt bt-quieto" data-acao="fichas-escolher">Fichas para recorte</button>
@@ -4256,6 +4255,7 @@ function telaAjustes(){
     </div>
 
     `;
+  }
   if(sec==="clientes") return voltar + `<div class="card"><h3>Cadastro de clientes</h3>
       <p class="nota">Vale para todos os eventos. Quem já comprou uma vez aparece na hora de abrir o fiado, com o telefone junto — não precisa cadastrar de novo.</p>
       <input class="campo" id="in-pessoas" placeholder="Procurar no cadastro" value="${esc(S.buscaPessoa||"")}" autocomplete="off" style="margin-top:10px">
@@ -4325,7 +4325,7 @@ function telaAjustes(){
       <span class="saldo quite" style="font-size:${alerta?13:18}px;color:${alerta?"var(--ambar)":"var(--latao-sv)"};background:var(--latao-luz)">${alerta||"›"}</span></button>`;
   return `<div class="lista">
       ${itemSec("evento","🎪","Evento", esc([ev.nome, periodo(ev.ini,ev.fim)].filter(Boolean).join(" · "))+" · PIX, mensagem, outros eventos")}
-      ${itemSec("cardapio","🍺","Cardápio e fichas", `${outros.length} produto(s) · ${fichas.length} ficha(s) · impressos`)}
+      ${itemSec("cardapio","🍺","Produtos e impressos", `${prods.length} produto(s) · cardápio e fichas para imprimir`)}
       ${itemSec("clientes","👥","Clientes", `${S.pessoas.length} no cadastro`)}
       ${itemSec("aparelhos","📱","Aparelhos e equipe", S.db? `${nAp} aparelho(s) · senha do responsável` : "este aparelho · senha do responsável", nPend? nPend+" aguardando" : "")}
       ${itemSec("empresa","🏷","Minha empresa e licença", esc(LICENCA.nome||"")+" · "+(LICENCA.validade? "válida até "+esc(dataBR(LICENCA.validade)) : "vitalícia"))}
@@ -4584,7 +4584,7 @@ function mexerProduto(id, fn){
 function moverProduto(id, dir){
   const ev = JSON.parse(JSON.stringify(S.evento));
   const ps = ev.produtos||[]; const p = ps.find(x=>x.id===id); if(!p) return;
-  const grupo = ps.map((x,i)=>i).filter(i=>(ps[i].c==="Fichas")===(p.c==="Fichas"));
+  const grupo = ps.map((x,i)=>i).filter(i=>ps[i].c===p.c);
   const pos = grupo.indexOf(ps.indexOf(p)), destino = pos+dir;
   if(pos<0 || destino<0 || destino>=grupo.length) return;
   const a = grupo[pos], b = grupo[destino];
@@ -4631,7 +4631,7 @@ const MANUAL = [
   {h:"3. Antes do evento", p:["Faça esta preparação uma vez, no celular do dono. A aba Ajustes é dividida em seções:"],
    n:["Minha empresa e licença: confira a cidade e coloque a logo da sua empresa.",
       "Evento: cadastre o evento com nome, datas, chave PIX, titular, logo e a mensagem de agradecimento.",
-      "Cardápio e fichas: confira produtos e valores, crie as fichas e gere os impressos (cardápio com QR do PIX e fichas para recorte).",
+      "Produtos e impressos: confira os produtos e valores e gere os impressos: o cardápio com QR do PIX e as fichas para recorte, de qualquer produto.",
       "Aparelhos e equipe: crie a senha do responsável e libere os celulares de venda.",
       "Clientes: o cadastro se forma sozinho a cada fiado; dá para corrigir nomes e telefones.",
       "Dados e backup: sincronização e cópia de segurança."],
@@ -5681,17 +5681,16 @@ document.addEventListener("click", async (e)=>{
     if(a==="fichas-primeiro"){ const ev = JSON.parse(JSON.stringify(S.evento));
       ev.fichasPrimeiro = !ev.fichasPrimeiro; await salvarEventoDoc(ev); desenhar(); return; }
     if(a==="add-ficha" || a==="add-produto"){
-      const ficha = a==="add-ficha";
-      const nomeIn = ficha? $("fi-nome") : $("pr-nome"), valIn = ficha? $("fi-valor") : $("pr-valor");
+      const nomeIn = $("pr-nome"), valIn = $("pr-valor");
       let nome = (nomeIn.value||"").trim();
       const v = parseFloat(String(valIn.value||"").replace(",","."));
       if(!nome){ aviso("<b>Falta o nome</b>"); return; }
       if(!(v>=0)){ aviso("<b>Falta o valor</b>"); return; }
-      if(ficha && !/^ficha/i.test(nome)) nome = "Ficha "+nome;
+      const cat = $("pr-cat").value;
       const ev = JSON.parse(JSON.stringify(S.evento));
-      ev.produtos = (ev.produtos||[]).concat([{id:"p"+novoId(), n:nome, p:v,
-        c: ficha? "Fichas" : $("pr-cat").value, ativo:true}]);
-      await salvarEventoDoc(ev); desenhar(); aviso("<b>Criado</b>"+esc(nome)); return;
+      ev.produtos = (ev.produtos||[]).concat([{id:"p"+novoId(), n:nome, p:v, c:cat, ativo:true}]);
+      S.ultimaCat = cat;
+      await salvarEventoDoc(ev); desenhar(); aviso("<b>Cadastrado</b>"+esc(nome)+" · "+esc(cat)); return;
     }
     if(a==="cardapio-padrao"){ confirmar("Restaurar cardápio",
       "Volta aos itens e preços do cardápio padrão. As vendas já registradas continuam no histórico.",
@@ -5751,6 +5750,9 @@ document.addEventListener("change", async (e)=>{
     const v = parseFloat(String(e.target.value).replace(",","."));
     if(!(v>=0)){ desenhar(); return; }
     mexerProduto(e.target.dataset.preco, (p)=>{ p.p = v; }); return;
+  }
+  if(e.target.dataset && e.target.dataset.catp){
+    const c = e.target.value; mexerProduto(e.target.dataset.catp, (p)=>{ p.c = c; }); return;
   }
   if(e.target.dataset && e.target.dataset.nome){
     const t = (e.target.value||"").trim(); if(!t){ desenhar(); return; }
