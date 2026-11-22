@@ -298,6 +298,10 @@ body{background:var(--papel);}
 .bt-quieto{background:#fff; border-color:var(--linha);}
 .campo{border-radius:14px;}
 .folha{background:rgba(10,20,36,.62);}
+
+.fone-linha{display:flex; gap:6px; align-items:stretch;}
+.fone-linha .campo{flex:1; min-width:0;}
+.fone-linha .bt-agenda{width:auto; flex:none; white-space:nowrap; padding:0 12px;}
 </style>
 
 <script>/** @license
@@ -6379,6 +6383,64 @@ document.addEventListener("click", (e)=>{
   if(S.travado && e.target.closest("[data-pedir-pin]")) folhaPin();
 });
 window.addEventListener("keydown",(e)=>{ if(e.key==="Escape") fechaFolha(); });
+/* ═══════════ telefone da agenda do aparelho ═══════════
+   Android (Chrome): abre a agenda e traz nome e número.
+   iPhone: o Safari não deixa sites abrirem a agenda; o botão cola o número copiado nos Contatos. */
+const AGENDA = !!(navigator.contacts && navigator.contacts.select);
+function foneDaAgenda(t){
+  let d = String(t||"").replace(/\D/g,"");
+  if(d.length>=12 && d.startsWith("55")) d = d.slice(2);
+  if(d.length>=12 && d.startsWith("0")) d = d.slice(-11);
+  if(d.length===11 && d.startsWith("0")) d = d.slice(1);
+  return d.length>11 ? d.slice(-11) : d;
+}
+function preencherFone(inp, numero, nome){
+  const f = foneDaAgenda(numero);
+  if(f.length<10){ aviso("<b>Número não reconhecido</b>Confira e digite com DDD", 4000); return; }
+  inp.value = (typeof foneBR==="function")? foneBR(f) : f;
+  inp.dispatchEvent(new Event("input", {bubbles:true}));
+  if(nome){
+    const cx = inp.closest(".campos, .folha-cx, .card") || document;
+    const n = [...cx.querySelectorAll("input")].find(x=>/nome/.test(x.id||"") && x!==inp);
+    if(n && !n.value.trim()){ n.value = nome; n.dispatchEvent(new Event("input", {bubbles:true})); }
+  }
+  aviso("<b>Telefone preenchido</b>"+esc((nome? nome+" · ":"")+inp.value), 2500);
+}
+async function pegarFone(inp){
+  try{
+    if(AGENDA){
+      const r = await navigator.contacts.select(["name","tel"], {multiple:false});
+      if(!r || !r.length) return;
+      const tels = (r[0].tel||[]).map(foneDaAgenda).filter(x=>x.length>=10);
+      if(!tels.length){ aviso("<b>Esse contato não tem telefone</b>", 3500); return; }
+      const cel = tels.find(x=>x.length===11 && x[2]==="9") || tels[0];
+      preencherFone(inp, cel, (r[0].name||[])[0]||""); return;
+    }
+    const t = navigator.clipboard && navigator.clipboard.readText ? await navigator.clipboard.readText() : "";
+    if(!t || foneDaAgenda(t).length<10){
+      folha(`<div class="olho">Telefone da agenda</div>
+        <p class="nota" style="margin-top:8px">No iPhone o Safari não deixa o sistema abrir a agenda. Faça assim:</p>
+        <ol class="nota" style="padding-left:18px;margin:8px 0"><li>Abra o app <b>Contatos</b> e entre no contato.</li>
+        <li>Toque e segure no número e toque em <b>Copiar</b>.</li><li>Volte aqui e toque em <b>📋 Colar</b>.</li></ol>
+        <div class="btns"><button class="bt bt-quieto" data-fechar>Entendi</button></div>`); return;
+    }
+    preencherFone(inp, t, "");
+  }catch(e){ if(!(e && e.name==="AbortError")) aviso("<b>Não consegui abrir a agenda</b>Digite o número", 3500); }
+}
+function enfeitarFones(){
+  document.querySelectorAll('input[type="tel"]:not([data-agenda]), input[inputmode="tel"]:not([data-agenda])').forEach(inp=>{
+    inp.dataset.agenda = "1";
+    const cx = document.createElement("span"); cx.className = "fone-linha";
+    inp.parentNode.insertBefore(cx, inp); cx.appendChild(inp);
+    const b = document.createElement("button"); b.type = "button"; b.className = "bt bt-quieto bt-agenda";
+    b.textContent = AGENDA? "📇 Agenda" : "📋 Colar"; b.title = AGENDA? "Buscar na agenda do aparelho" : "Colar número copiado dos Contatos";
+    b.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); pegarFone(inp); });
+    cx.appendChild(b);
+  });
+}
+try{ new MutationObserver(()=>{ clearTimeout(enfeitarFones.t); enfeitarFones.t = setTimeout(enfeitarFones, 30); })
+  .observe(document.body, {childList:true, subtree:true}); }catch(e){}
+
 })();
 </script>
 
