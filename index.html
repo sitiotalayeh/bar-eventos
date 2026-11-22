@@ -3294,9 +3294,17 @@ const S = {
 S.dev = lembrar("dev","") || ("d"+novoId());
 guardar("dev", S.dev);
 S.posto = lembrar("posto","");
-S.travado = lembrar("travado", false) === true;
+S.travado = false; guardar("travado", false);   /* modo operador antigo: substituído pelos papéis dos aparelhos */
 
-const admin = ()=> S.podeEditar && !S.travado;
+/* dono e gerente gerenciam; aparelho comum só vende. Sem nuvem (um aparelho só) ou sem dono definido, tudo liberado. */
+function papel(){
+  if(!S.db) return "gestor";
+  const eu = (S.aparelhos||[]).find(a=>a.id===S.dev);
+  if(eu){ const p = eu.gerente? "gestor" : "comum"; if(lembrar("papel","")!==p) guardar("papel", p); return p; }
+  if(S.apPronto && !(S.aparelhos||[]).some(a=>a.gerente)) return "gestor";
+  return lembrar("papel", "") || "comum";
+}
+const admin = ()=> S.podeEditar && papel()==="gestor";
 
 /* ═══════════ fila de gravação ═══════════ */
 let corrente = Promise.resolve();
@@ -3763,8 +3771,9 @@ function pintarTopo(){
   pintarSinal();
 }
 function pintarMenu(){
-  const abas = [["vender","🛒","Vender"],["contas","📒","Fiado"]];
-  if(admin()) abas.push(["estoque","📦","Estoque"], ["caixa","📊","Relatórios"], ["ajustes","⚙️","Ajustes"]);
+  const abas = [["vender","🛒","Vender"]];
+  if(admin()) abas.push(["contas","📒","Fiado"], ["estoque","📦","Estoque"], ["caixa","📊","Relatórios"], ["ajustes","⚙️","Ajustes"]);
+  if(!abas.some(a=>a[0]===S.aba)) S.aba = "vender";
   const devendo = C.contas.filter(c=>c.saldo>0.004).length;
   const alertas = (C.alertas||[]).length;
   $("menu").innerHTML = abas.map(([k,ic,r])=>
@@ -3784,7 +3793,9 @@ function desenhar(){
     <div class="btns"><button class="bt bt-quieto" data-acao="religar-nuvem">Verificar de novo</button>
       <button class="bt bt-quieto" data-acao="trocar-chave">Usar outra chave</button></div></div>`; return; }
   pintarTopo(); pintarMenu();
-  if(!S.evento){ t.innerHTML = telaSemEvento(); return; }
+  if(!S.evento){ t.innerHTML = admin()? telaSemEvento() : (S.db && !S.apPronto)
+    ? `<div class="card"><h3>Conectando…</h3><p class="nota">Este aparelho precisa de internet na primeira vez para confirmar se é o aparelho do dono. Assim que conectar, a tela se ajusta sozinha.</p></div>`
+    : `<div class="card"><h3>Nenhum evento aberto</h3><p class="nota">Este aparelho é de venda. Peça ao dono do sistema para abrir o evento.</p></div>`; return; }
   if(!S.posto){ t.innerHTML = telaPosto(); return; }
   if(S.aba==="vender") t.innerHTML = telaVender();
   else if(S.aba==="contas") t.innerHTML = telaContas();
@@ -4166,7 +4177,9 @@ function telaAjustes(){
       <button class="bt bt-quieto bt-mini" data-tira="${esc(p.id)}">✕</button></div>`;
   };
   const outrosEv = S.eventos.filter(e=>e.id!==S.evId);
-  return `${cardOrg(' style="margin-top:0"')}<div class="card"><h3>Evento</h3>
+  const voltar = `<button class="bt bt-quieto" data-acao="secao" data-secao="" style="margin:0 0 12px;width:auto;padding:0 14px">‹ Ajustes</button>`;
+  const sec = S.secao||"";
+  if(sec==="evento") return voltar + `<div class="card"><h3>Evento</h3>
       <div class="campos">
         <div><label class="rot" for="cfg-nome">Nome</label><input class="campo" id="cfg-nome" value="${esc(ev.nome)}"></div>
         <div><label class="rot">Logo do evento</label>${blocoLogo("ev", ev.logo||"")}
@@ -4209,6 +4222,20 @@ function telaAjustes(){
           <span class="saldo" style="color:var(--latao-sv);font-size:14px">abrir</span></button>`).join("")}</div>`:""}
     </div>
 
+    `;
+  if(sec==="cardapio") return voltar + `<div class="card"><h3>Produtos</h3>
+      ${outros.map(p=>linha(p,outros)).join("") || `<p class="nota">Nenhum produto cadastrado.</p>`}
+      <div class="campos" style="margin-top:10px">
+        <input class="campo" id="pr-nome" placeholder="Nome do produto">
+        <div class="linha-campos">
+          <select class="campo" id="pr-cat">${CATS.filter(c=>c!=="Fichas").map(c=>`<option>${c}</option>`).join("")}</select>
+          <input class="campo" id="pr-valor" inputmode="decimal" placeholder="Valor">
+        </div>
+      </div>
+      <div class="btns"><button class="bt bt-quieto" data-acao="add-produto">Criar produto</button>
+        <button class="bt bt-quieto" data-acao="cardapio-padrao">Restaurar cardápio padrão</button></div>
+    </div>
+
     <div class="card"><h3>Fichas</h3>
       <button class="bt bt-quieto" data-acao="fichas-primeiro" style="justify-content:space-between">
         <span>Fichas primeiro na tela de vendas</span><span>${ev.fichasPrimeiro?"SIM":"não"}</span></button>
@@ -4228,20 +4255,8 @@ function telaAjustes(){
       </div>
     </div>
 
-    <div class="card"><h3>Produtos</h3>
-      ${outros.map(p=>linha(p,outros)).join("") || `<p class="nota">Nenhum produto cadastrado.</p>`}
-      <div class="campos" style="margin-top:10px">
-        <input class="campo" id="pr-nome" placeholder="Nome do produto">
-        <div class="linha-campos">
-          <select class="campo" id="pr-cat">${CATS.filter(c=>c!=="Fichas").map(c=>`<option>${c}</option>`).join("")}</select>
-          <input class="campo" id="pr-valor" inputmode="decimal" placeholder="Valor">
-        </div>
-      </div>
-      <div class="btns"><button class="bt bt-quieto" data-acao="add-produto">Criar produto</button>
-        <button class="bt bt-quieto" data-acao="cardapio-padrao">Restaurar cardápio padrão</button></div>
-    </div>
-
-    <div class="card"><h3>Cadastro de clientes</h3>
+    `;
+  if(sec==="clientes") return voltar + `<div class="card"><h3>Cadastro de clientes</h3>
       <p class="nota">Vale para todos os eventos. Quem já comprou uma vez aparece na hora de abrir o fiado, com o telefone junto — não precisa cadastrar de novo.</p>
       <input class="campo" id="in-pessoas" placeholder="Procurar no cadastro" value="${esc(S.buscaPessoa||"")}" autocomplete="off" style="margin-top:10px">
       ${(()=>{
@@ -4265,26 +4280,28 @@ function telaAjustes(){
       </div>
     </div>
 
-    <div class="card"><h3>Acesso dos operadores</h3>
-      <p class="nota">Quem vende usa só <b>Vender</b> e <b>Contas</b>. Caixa e Ajustes ficam escondidos até digitar a senha.</p>
-      <div class="campos" style="margin-top:10px">
-        <div><label class="rot" for="in-pin">Senha do responsável (4 a 8 números)</label>
-        <input class="campo" id="in-pin" inputmode="numeric" placeholder="${S.cfg&&S.cfg.pin? "senha já definida":"sem senha ainda"}"></div>
-      </div>
-      <div class="btns">
-        <button class="bt bt-quieto" data-acao="salvar-pin">Salvar senha</button>
-        <button class="bt bt-ouro" data-acao="travar">Travar este aparelho no modo operador</button>
-      </div>
-    </div>
-
-    <div class="card"><h3>Este aparelho</h3>
+    `;
+  if(sec==="aparelhos") return voltar + `<div class="card"><h3>Este aparelho</h3>
       <div class="item"><span class="cresce">Posto</span><span class="val">${esc(S.posto)}</span></div>
       <div class="item"><span class="cresce">Aparelho</span><span class="val">${esc(modeloAparelho())}</span></div>
       <div class="btns"><button class="bt bt-quieto" data-acao="trocar-posto">Trocar o nome deste posto</button></div>
     </div>
     ${cardAparelhos()}
-
-    ${FIREBASE? `<div class="card"><h3>☁️ Sincronização</h3>
+    <div class="card"><h3>🔐 Senha do responsável</h3>
+      <p class="nota">Usada para definir o aparelho do dono e para liberar, no próprio aparelho, um celular bloqueado. Não passe para quem só vende.</p>
+      <input class="campo" id="in-pin" inputmode="numeric" type="password" style="margin-top:10px" placeholder="${S.cfg&&S.cfg.pin? "senha já definida — digite para trocar":"crie uma senha de 4 a 8 números"}">
+      <div class="btns"><button class="bt bt-quieto" data-acao="salvar-pin">Salvar senha</button></div>
+    </div>`;
+  if(sec==="empresa") return voltar + `${cardOrg(' style="margin-top:0"')}<div class="card"><h3>🔑 Licença</h3>
+      <div class="item"><span class="cresce">Licenciado para</span><span class="val">${esc(LICENCA.nome||"")}</span></div>
+      <div class="item"><span class="cresce">Validade</span><span class="val">${LICENCA.validade? esc(dataBR(LICENCA.validade)) : "vitalícia"}</span></div>
+      <div class="item"><span class="cresce">Chave</span><span class="val" style="font-family:ui-monospace,monospace;font-size:12px">${esc(LICENCA.chave||"")}</span></div>
+      <div class="btns"><button class="bt bt-quieto" data-acao="trocar-chave">Renovar / trocar chave</button>
+        <button class="bt bt-quieto" data-acao="pdf-manual">📘 Manual do sistema (PDF)</button>
+        <button class="bt bt-quieto" data-acao="trocar-org">Usar outra licença (outro organizador)</button></div>
+    </div>
+    <p class="nota" style="text-align:center;margin:18px 0 6px">${esc(PRODUTO.nome)} · versão ${esc(PRODUTO.versao)}${PRODUTO.desenvolvedor? "<br>Desenvolvido por "+esc(PRODUTO.desenvolvedor):""}${PRODUTO.contato? " · "+esc(PRODUTO.contato):""}</p>`;
+  if(sec==="dados") return voltar + `${FIREBASE? `<div class="card"><h3>☁️ Sincronização</h3>
       <p class="nota">${S.db? "Ligada: todos os aparelhos ativados com a mesma licença veem as mesmas vendas, contas e cardápio em tempo real. Sem internet, continua vendendo e envia quando o sinal voltar."
         : "Desligada: os dados ficam só neste aparelho."}</p>
       <button class="bt bt-quieto" style="margin-top:10px;justify-content:space-between" data-acao="alterna-sync">
@@ -4300,13 +4317,19 @@ function telaAjustes(){
       </div>
       <p class="nota" id="conf-dados">${C.validos.length} lançamento(s) · ${fmt(C.resumo.vendido)} vendidos · ${C.contas.length} cliente(s)</p>
     </div>
-    <div class="card"><h3>🔑 Licença</h3>
-      <div class="item"><span class="cresce">Licenciado para</span><span class="val">${esc(LICENCA.nome||"")}</span></div>
-      <div class="item"><span class="cresce">Validade</span><span class="val">${LICENCA.validade? esc(dataBR(LICENCA.validade)) : "vitalícia"}</span></div>
-      <div class="item"><span class="cresce">Chave</span><span class="val" style="font-family:ui-monospace,monospace;font-size:12px">${esc(LICENCA.chave||"")}</span></div>
-      <div class="btns"><button class="bt bt-quieto" data-acao="trocar-chave">Renovar / trocar chave</button>
-        <button class="bt bt-quieto" data-acao="pdf-manual">📘 Manual do sistema (PDF)</button>
-        <button class="bt bt-quieto" data-acao="trocar-org">Usar outra licença (outro organizador)</button></div>
+    `;
+  const nAp = (S.aparelhos||[]).length, nPend = (S.aparelhos||[]).filter(a=>a.situacao==="pendente").length;
+  const itemSec = (k, ic, titulo, sub, alerta)=>`<button class="conta" data-acao="secao" data-secao="${k}">
+      <span style="font-size:26px;width:36px;text-align:center">${ic}</span>
+      <span class="corpo"><span class="nome">${titulo}</span><span class="sub">${sub}</span></span>
+      <span class="saldo quite" style="font-size:${alerta?13:18}px;color:${alerta?"var(--ambar)":"var(--latao-sv)"};background:var(--latao-luz)">${alerta||"›"}</span></button>`;
+  return `<div class="lista">
+      ${itemSec("evento","🎪","Evento", esc([ev.nome, periodo(ev.ini,ev.fim)].filter(Boolean).join(" · "))+" · PIX, mensagem, outros eventos")}
+      ${itemSec("cardapio","🍺","Cardápio e fichas", `${outros.length} produto(s) · ${fichas.length} ficha(s) · impressos`)}
+      ${itemSec("clientes","👥","Clientes", `${S.pessoas.length} no cadastro`)}
+      ${itemSec("aparelhos","📱","Aparelhos e equipe", S.db? `${nAp} aparelho(s) · senha do responsável` : "este aparelho · senha do responsável", nPend? nPend+" aguardando" : "")}
+      ${itemSec("empresa","🏷","Minha empresa e licença", esc(LICENCA.nome||"")+" · "+(LICENCA.validade? "válida até "+esc(dataBR(LICENCA.validade)) : "vitalícia"))}
+      ${itemSec("dados","☁️","Dados e backup", S.db? "sincronizado entre aparelhos · backup" : "só neste aparelho · backup")}
     </div>
     <p class="nota" style="text-align:center;margin:18px 0 6px">${esc(PRODUTO.nome)} · versão ${esc(PRODUTO.versao)}${PRODUTO.desenvolvedor? "<br>Desenvolvido por "+esc(PRODUTO.desenvolvedor):""}${PRODUTO.contato? " · "+esc(PRODUTO.contato):""}</p>`;
 }
@@ -4605,16 +4628,15 @@ const MANUAL = [
     {t:"Computador", p:["Abra o endereço no Chrome, Edge ou Safari e salve nos favoritos."]}]},
   {h:"2. Ativação", n:["Na tela Ativar, digite o nome do organizador exatamente como recebeu.", "Cole ou digite a chave de ativação.", "Toque em Ativar."],
    p:["Em todos os celulares do bar, use o mesmo nome e a mesma chave: todos passam a ver as mesmas vendas, contas, cardápio e senha. O nome licenciado aparece no topo, nas comandas e nos relatórios."]},
-  {h:"3. Antes do evento", p:["Faça esta preparação uma vez, no celular do responsável, em Ajustes."],
-   n:["Organizador: confira a cidade e coloque a logo da sua empresa.",
-      "Evento: toque em Cadastrar novo evento e preencha nome, datas, chave PIX e titular do PIX.",
-      "Logo do evento: no card Evento, toque em Escolher logo.",
-      "Mensagem do rodapé: escreva um agradecimento. Ele vai no PDF da conta e na cobrança.",
-      "Produtos e fichas: confira o cardápio, ajuste valores e crie o que faltar.",
-      "Senha do responsável: em Acesso dos operadores, crie uma senha de 4 a 8 números.",
-      "Impressos: em Impressos do evento, gere o cardápio com QR do PIX e as fichas para recorte."],
+  {h:"3. Antes do evento", p:["Faça esta preparação uma vez, no celular do dono. A aba Ajustes é dividida em seções:"],
+   n:["Minha empresa e licença: confira a cidade e coloque a logo da sua empresa.",
+      "Evento: cadastre o evento com nome, datas, chave PIX, titular, logo e a mensagem de agradecimento.",
+      "Cardápio e fichas: confira produtos e valores, crie as fichas e gere os impressos (cardápio com QR do PIX e fichas para recorte).",
+      "Aparelhos e equipe: crie a senha do responsável e libere os celulares de venda.",
+      "Clientes: o cadastro se forma sozinho a cada fiado; dá para corrigir nomes e telefones.",
+      "Dados e backup: sincronização e cópia de segurança."],
    b:["Exigir WhatsApp ao abrir fiado novo: com SIM, ninguém abre fiado sem telefone.",
-      "Celulares dos operadores: dê um nome ao posto (Caixa 1, Bar) e toque em Travar este aparelho no modo operador. O operador só vê Vender e Fiado."]},
+      "Celulares de venda: cada um dá um nome ao seu posto (Caixa 1, Bar) na primeira vez. Aparelho comum só vê a aba Vender."]},
   {h:"4. Vender", n:["Na aba Vender, toque nos produtos. Cada toque soma uma unidade.", "Ajuste as quantidades com + e -.",
       "Toque em Fechar venda e escolha: Dinheiro, PIX, Débito, Crédito ou Fiado."],
    b:["PIX: a tela mostra o valor, a chave em letras grandes com o botão Copiar chave e o QR Code com o valor. Confira o comprovante e toque em Pagamento recebido.",
@@ -4629,12 +4651,12 @@ const MANUAL = [
       "Vendas: mais vendidos, por posto e por hora.", "Clientes: quem mais consumiu e lista de cobrança.",
       "Movimento: últimos lançamentos, com cancelamento.", "Eventos: comparativo dos eventos já feitos."],
    p:["No fim de cada dia, gere o PDF Relatório completo, com espaço para assinatura de quem fechou e de quem conferiu."]},
-  {h:"8. Aparelhos: dono, gerentes e bloqueio", b:["Dono: libera e bloqueia qualquer aparelho, cria gerentes e pode passar o papel de dono. Ninguém consegue bloqueá-lo.",
-      "Gerente: libera e bloqueia os aparelhos comuns.", "Comum: vende normalmente.",
+  {h:"8. Aparelhos: dono, gerentes e bloqueio", b:["Dono: vê todas as abas, libera e bloqueia qualquer aparelho, cria gerentes e pode passar o papel de dono. Ninguém consegue bloqueá-lo.",
+      "Gerente: vê todas as abas e libera ou bloqueia os aparelhos comuns.", "Comum: só a aba Vender (inclusive lançar no fiado).",
       "Aparelho novo precisa da minha liberação: com SIM, um celular novo só vende depois de liberado.",
       "Bloquear todos os outros: no fim do evento, trava de uma vez os aparelhos comuns.",
       "Passar dono: para trocar de celular, libere o novo e toque em Passar dono nele."],
-   p:["Tudo isso fica em Ajustes > Aparelhos. Não passe a senha do responsável para os operadores."]},
+   p:["Tudo isso fica em Ajustes > Aparelhos e equipe. Não passe a senha do responsável para quem só vende."]},
   {h:"9. Internet, sincronização e backup", b:["sincronizado: tudo enviado.", "N por enviar: vendas guardadas esperando sinal; envia sozinho.",
       "sem internet · salvando: continue vendendo normalmente.", "conectando...: aguarde alguns segundos."],
    p:["Antes de fechar o caixa, espere todos os celulares mostrarem sincronizado. No fim de cada evento, baixe o backup em Ajustes > Backup."]},
@@ -5293,7 +5315,7 @@ document.addEventListener("click", async (e)=>{
   let el;
 
   if((el = alvo("data-fechar"))){ fechaFolha(); return; }
-  if((el = alvo("data-aba"))){ S.aba = el.dataset.aba; S.busca=""; desenhar(); return; }
+  if((el = alvo("data-aba"))){ if(el.dataset.aba==="ajustes" && S.aba==="ajustes") S.secao = ""; S.aba = el.dataset.aba; S.busca=""; desenhar(); return; }
   if((el = alvo("data-cat"))){ S.cat = el.dataset.cat; desenhar(); return; }
   if((el = alvo("data-add"))){ addCarrinho(el.dataset.add); return; }
   if((el = alvo("data-menos"))){ menosCarrinho(el.dataset.menos); return; }
@@ -5580,6 +5602,7 @@ document.addEventListener("click", async (e)=>{
       } else aviso("<b>Senha errada</b>"+(!(S.cfg&&S.cfg.pin)? "Nenhuma senha definida":""), 3000);
       return;
     }
+    if(a==="secao"){ S.secao = el.dataset.secao||""; desenhar(); try{ window.scrollTo(0,0); }catch(e){} return; }
     if(a==="pdf-cardapio"){ pdfCardapio(); return; }
     if(a==="trocar-org"){
       folha(`<div class="olho">Licença</div>
