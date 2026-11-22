@@ -49,7 +49,7 @@ button:disabled{opacity:.5}
 #folha{background:#fff;width:100%;max-width:620px;max-height:90vh;overflow:auto;border-radius:18px 18px 0 0;padding:18px 16px;padding-bottom:max(18px,env(safe-area-inset-bottom))}
 #aviso{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--couro);color:#fff;padding:12px 16px;border-radius:12px;font-size:14px;display:none;z-index:20;max-width:90vw;text-align:center}
 </style></head><body>
-<header><h1>🔑 Painel de licenças<small>Bar de Eventos · uso exclusivo do desenvolvedor</small></h1><button id="sair" hidden>Sair</button></header>
+<header><h1>🔑 Painel de licenças<small>Bar de Eventos e Bar Mensal · uso exclusivo do desenvolvedor</small></h1><button id="sair" hidden>Sair</button></header>
 <main id="tela"><div class="vazio">Carregando…</div></main>
 <div id="fundo"><div id="folha"></div></div>
 <div id="aviso"></div>
@@ -162,10 +162,18 @@ const auth = appPainel.auth(), db = appPainel.firestore();
 const logado = ()=>{ const u = auth.currentUser; return !!(u && !u.isAnonymous && u.email); };
 const col = db.collection("licencas");
 let lista = [], filtro = "todas", busca = "", parar = null, erroLista = "";
-const apsAbertos = {}, apsDados = {};   /* conta -> unsubscribe / lista de aparelhos */
+const apsAbertos = {}, apsDados = {};   /* chave -> unsubscribe / lista de aparelhos; chave = conta (Bar de Eventos) ou conta#m (Bar Mensal) */
+const contaDe = (k)=> k.split("#")[0], ehM = (k)=> /#m$/.test(k);
+const colAps = (k)=> col.doc(contaDe(k)).collection(ehM(k)? "m_aparelhos" : "aparelhos");
+const boxAps = (k)=> document.querySelector(`.aps[data-k="${k}"]`);
+const temMensal = (l)=> !!(l && l.modulos && l.modulos.mensal);
 function papelAp(x){ return x.cliente? "cliente" : x.principal? "dono" : x.gerente? "gerente" : "comum"; }
 function htmlAps(conta){
   const aps = apsDados[conta];
+  const tit = `<div style="border:0;font-weight:700;padding:0 0 4px">${ehM(conta)? "🏠 Aparelhos do Bar Mensal" : "🎪 Aparelhos do Bar de Eventos"}</div>`;
+  return tit + htmlAps2(conta, aps);
+}
+function htmlAps2(conta, aps){
   if(!aps) return "Carregando…";
   if(!aps.length) return `<div class="nota">Nenhum aparelho conectado ainda.</div>`;
   const temDono = aps.some(x=>x.principal);
@@ -190,16 +198,16 @@ function htmlAps(conta){
 }
 function abrirAps(conta){
   if(apsAbertos[conta]) return;
-  apsAbertos[conta] = col.doc(conta).collection("aparelhos").onSnapshot((s)=>{
+  apsAbertos[conta] = colAps(conta).onSnapshot((s)=>{
     apsDados[conta] = s.docs.map(d=>Object.assign({id:d.id}, d.data()))
       .sort((x,y)=>((y.principal?2:y.gerente?1:0)-(x.principal?2:x.gerente?1:0)) || ((y.visto||0)-(x.visto||0)));
-    const box = document.querySelector(`.lic[data-conta="${conta}"] .aps`); if(box) box.innerHTML = htmlAps(conta);
-  }, (err)=>{ const box = document.querySelector(`.lic[data-conta="${conta}"] .aps`); if(box) box.textContent = "Não consegui ler os aparelhos: "+(err.code||err.message); });
+    const box = boxAps(conta); if(box) box.innerHTML = htmlAps(conta);
+  }, (err)=>{ const box = boxAps(conta); if(box) box.textContent = "Não consegui ler os aparelhos: "+(err.code||err.message); });
 }
 function fecharAps(conta){ if(apsAbertos[conta]){ apsAbertos[conta](); delete apsAbertos[conta]; } }
 async function mudarPapel(conta, id, novo){
   const aps = apsDados[conta]||[], alvo = aps.find(x=>x.id===id); if(!alvo) return;
-  const ref = col.doc(conta).collection("aparelhos");
+  const ref = colAps(conta);
   try{
     if(novo==="dono"){
       const atual = aps.find(x=>x.principal && x.id!==id);
@@ -207,7 +215,7 @@ async function mudarPapel(conta, id, novo){
       if(atual) await ref.doc(atual.id).set({principal:false, gerente:true}, {merge:true});
       aviso(esc(alvo.posto||"Aparelho")+" agora é o dono"+(atual? " · "+esc(atual.posto||"o anterior")+" virou gerente":""), 4000);
     } else {
-      if(alvo.principal){ aviso("Para tirar o dono, escolha antes outro aparelho como Dono.", 4500); const box=document.querySelector(`.lic[data-conta="${conta}"] .aps`); if(box) box.innerHTML = htmlAps(conta); return; }
+      if(alvo.principal){ aviso("Para tirar o dono, escolha antes outro aparelho como Dono.", 4500); const box=boxAps(conta); if(box) box.innerHTML = htmlAps(conta); return; }
       await ref.doc(id).set({principal:false, gerente: novo==="gerente"}, {merge:true});
       aviso(esc(alvo.posto||"Aparelho")+" agora é "+(novo==="gerente"?"gerente":"comum"));
     }
@@ -221,12 +229,17 @@ function situacao(l){
   return {t:"ativa", cor:"var(--verde)", ord:0};
 }
 const linkAtivar = (l)=> SITE + "#ativar=" + encodeURIComponent(l.nome) + "&chave=" + l.chave;
-function mensagem(l){
-  return `Olá! Segue a ativação do *Bar de Eventos*:\n\nNome do organizador: *${l.nome}*\nChave: *${l.chave}*\nValidade: ${l.validade? br(l.validade):"vitalícia"}\n\n*Ativar com um toque* (abra no Safari no iPhone ou no Chrome no Android):\n${linkAtivar(l)}\n\nDepois de ativar, toque em Compartilhar > Adicionar à Tela de Início.\n\nSe preferir digitar: abra ${SITE} e informe o nome exatamente como acima e a chave.\n\nUse a mesma chave em todos os celulares do seu bar: eles ficam sincronizados.\n\nDúvidas e novas aquisições: ${CONTATO.charAt(0).toLowerCase()+CONTATO.slice(1)}`;
+const SITE_M = SITE + "mensal.html";
+const linkAtivarM = (l)=> SITE_M + "#ativar=" + encodeURIComponent(l.nome) + "&chave=" + l.chave;
+function mensagemMensal(l){
+  return `Olá! O módulo *Bar Mensal* já está ativo na sua licença (${l.nome}). 🏠\n\nÉ o bar do dia a dia: cada cliente lança o próprio consumo pelo celular e você fecha e cobra no fim do mês.\n\n*Abrir com um toque* (Safari no iPhone ou Chrome no Android):\n${linkAtivarM(l)}\n\nDepois toque em Compartilhar > Adicionar à Tela de Início. Ele fica como um app separado do Bar de Eventos, com a mesma chave.\n\nDúvidas: ${CONTATO.charAt(0).toLowerCase()+CONTATO.slice(1)}`;
 }
-function zap(l){
+function mensagem(l){
+  return `Olá! Segue a ativação do *Bar de Eventos*:\n\nNome do organizador: *${l.nome}*\nChave: *${l.chave}*\nValidade: ${l.validade? br(l.validade):"vitalícia"}\n\n*Ativar com um toque* (abra no Safari no iPhone ou no Chrome no Android):\n${linkAtivar(l)}\n\nDepois de ativar, toque em Compartilhar > Adicionar à Tela de Início.\n\nSe preferir digitar: abra ${SITE} e informe o nome exatamente como acima e a chave.\n\nUse a mesma chave em todos os celulares do seu bar: eles ficam sincronizados.${temMensal(l)? `\n\n🏠 *Bar Mensal* (módulo incluído): ${linkAtivarM(l)}` : ""}\n\nDúvidas e novas aquisições: ${CONTATO.charAt(0).toLowerCase()+CONTATO.slice(1)}`;
+}
+function zap(l, txt){
   const f = soDig(l.fone); const num = f? (f.length<=11? "55"+f : f) : "";
-  location.href = "https://wa.me/"+num+"?text="+encodeURIComponent(mensagem(l));
+  location.href = "https://wa.me/"+num+"?text="+encodeURIComponent(txt || mensagem(l));
 }
 async function copiar(txt, rot){
   try{ await navigator.clipboard.writeText(txt); aviso(rot||"Copiado"); }
@@ -279,7 +292,8 @@ function desenhar(){
       <div class="chave">${esc(l.chave||"— chave não registrada —")}</div>
       <div class="dados">Validade: <b>${esc(br(l.validade))}</b>${l.fone? " · WhatsApp: "+esc(foneBR(l.fone)):""}<br>
         Criada ${l.criadaEm? new Date(l.criadaEm).toLocaleDateString("pt-BR"):"—"}${l.atualizadaEm && l.atualizadaEm!==l.criadaEm? " · alterada "+new Date(l.atualizadaEm).toLocaleDateString("pt-BR"):""} · conta ${esc(l.id)}
-        ${l.obs? `<br>Obs.: ${esc(l.obs)}`:""}</div>
+        ${l.obs? `<br>Obs.: ${esc(l.obs)}`:""}
+        <br>🏠 Módulo Bar Mensal: <b style="color:${temMensal(l)? "var(--verde)" : "#777"}">${temMensal(l)? "ativo" : "não contratado"}</b></div>
       <div class="acoes">
         <button class="verde" data-a="zap" ${l.chave?"":"disabled"}>Enviar no WhatsApp</button>
         <button data-a="copiar" ${l.chave?"":"disabled"}>Copiar chave</button>
@@ -287,10 +301,16 @@ function desenhar(){
         ${l.bloqueado? `<button class="verde" data-a="reativar">Reativar</button>` : `<button class="perigo" data-a="suspender">Suspender</button>`}
         <button data-a="editar">Editar</button>
         <button data-a="aparelhos">Aparelhos</button>
+        ${temMensal(l)? `<button data-a="aparelhos-m">Aparelhos do Bar Mensal</button>
+          <button class="verde" data-a="zap-m" ${l.chave?"":"disabled"}>Enviar Bar Mensal no WhatsApp</button>
+          <button data-a="link-m" ${l.chave?"":"disabled"}>Copiar link do Bar Mensal</button>
+          <button class="perigo" data-a="mod-off">Desativar Bar Mensal</button>`
+        : `<button class="verde" data-a="mod-on">Ativar Bar Mensal</button>`}
         <button data-a="link" ${l.chave?"":"disabled"}>Copiar link de ativação</button>
         <button class="perigo" data-a="excluir">Excluir</button>
       </div>
-      <div class="aps" ${apsAbertos[l.id]? "" : "hidden"}>${apsAbertos[l.id]? htmlAps(l.id) : ""}</div>
+      <div class="aps" data-k="${esc(l.id)}" ${apsAbertos[l.id]? "" : "hidden"}>${apsAbertos[l.id]? htmlAps(l.id) : ""}</div>
+      <div class="aps" data-k="${esc(l.id)}#m" ${apsAbertos[l.id+"#m"]? "" : "hidden"}>${apsAbertos[l.id+"#m"]? htmlAps(l.id+"#m") : ""}</div>
     </div>`; }).join("") || `<div class="vazio">${lista.length? "Nenhuma licença neste filtro." : "Nenhuma licença ainda. Toque em Nova licença ou Adicionar licença já vendida."}</div>`}`;
   const bi = $("busca"); bi.oninput = ()=>{ busca = bi.value; const pos = bi.selectionStart; desenhar(); const n=$("busca"); n.focus(); try{ n.setSelectionRange(pos,pos); }catch(e){} };
 }
@@ -331,7 +351,7 @@ function pintaVal(){ const v=$("f-val"), t=$("f-valtxt"); if(v&&t) t.textContent
 document.addEventListener("input", e=>{ if(e.target.id==="f-val") pintaVal(); });
 document.addEventListener("change", e=>{
   const sel = e.target.closest && e.target.closest("[data-ap-papel]"); if(!sel) return;
-  const conta = sel.closest("[data-conta]").dataset.conta, id = sel.closest("[data-apid]").dataset.apid;
+  const conta = sel.closest(".aps").dataset.k, id = sel.closest("[data-apid]").dataset.apid;
   const novo = sel.value, x = (apsDados[conta]||[]).find(y=>y.id===id);
   if(novo==="dono" && !confirm("Tornar "+((x&&x.posto)||"este aparelho")+" o DONO?\n\nO dono atual vira gerente.")){ sel.value = papelAp(x||{}); return; }
   mudarPapel(conta, id, novo);
@@ -418,6 +438,20 @@ document.addEventListener("click", async (e)=>{
   if(a==="zap"){ zap(l); return; }
   if(a==="copiar"){ copiar(l.chave, "Chave copiada"); return; }
   if(a==="link"){ copiar(linkAtivar(l), "Link de ativação copiado"); return; }
+  if(a==="link-m"){ copiar(linkAtivarM(l), "Link do Bar Mensal copiado"); return; }
+  if(a==="zap-m"){ zap(l, mensagemMensal(l)); return; }
+  if(a==="mod-on" || a==="mod-off"){
+    const liga = a==="mod-on";
+    if(!liga && !confirm("Desativar o Bar Mensal de "+l.nome+"?\n\nOs celulares do Bar Mensal travam ao se conectar. Os dados continuam guardados e voltam se você ativar de novo.")) return;
+    try{ await col.doc(l.id).set({modulos:Object.assign({}, l.modulos||{}, {mensal:liga}), atualizadaEm:Date.now()}, {merge:true});
+      if(liga){ folha(`<h2 style="margin:0">Bar Mensal ativado</h2><p class="nota">${esc(l.nome)} já pode abrir o Bar Mensal com a mesma chave.</p>
+        <button class="verde cheio" data-a="zap-m" data-conta="${esc(l.id)}">Enviar no WhatsApp${l.fone? " para "+esc(foneBR(l.fone)):""}</button>
+        <button class="cheio" style="margin-top:8px" data-a="link-m" data-conta="${esc(l.id)}">Copiar link do Bar Mensal</button>
+        <button class="cheio" style="margin-top:8px" data-a="fechar">Fechar</button>`); }
+      else aviso("Bar Mensal desativado"); }
+    catch(err){ aviso("Não consegui: "+(err.code||err.message), 4000); }
+    return;
+  }
   if(a==="excluir"){
     if(l.bloqueado){ aviso("Licença suspensa não pode ser excluída: excluir liberaria o cliente.", 4500); return; }
     let n = 0; try{ n = (await col.doc(l.id).collection("aparelhos").get()).size; }catch(err){}
@@ -452,14 +486,15 @@ document.addEventListener("click", async (e)=>{
     catch(err){ $("f-erro").textContent = "Não consegui salvar: "+(err.code||err.message); return; }
     mostrarChave(Object.assign({}, l, {chave, validade:v||""}), "Chave renovada"); return;
   }
-  if(a==="aparelhos"){
-    const box = card.querySelector(".aps");
-    if(apsAbertos[l.id]){ fecharAps(l.id); box.hidden = true; return; }
-    box.hidden = false; box.innerHTML = "Carregando…"; abrirAps(l.id); return;
+  if(a==="aparelhos" || a==="aparelhos-m"){
+    const k = l.id + (a==="aparelhos-m"? "#m" : ""), box = boxAps(k);
+    if(apsAbertos[k]){ fecharAps(k); box.hidden = true; return; }
+    box.hidden = false; box.innerHTML = "Carregando…"; abrirAps(k); return;
   }
   if(a==="ap-liberar" || a==="ap-bloquear" || a==="ap-excluir"){
-    const id = el.closest("[data-apid]").dataset.apid, x = (apsDados[l.id]||[]).find(y=>y.id===id); if(!x) return;
-    const ref = col.doc(l.id).collection("aparelhos").doc(id);
+    const k = el.closest(".aps").dataset.k;
+    const id = el.closest("[data-apid]").dataset.apid, x = (apsDados[k]||[]).find(y=>y.id===id); if(!x) return;
+    const ref = colAps(k).doc(id);
     try{
       if(a==="ap-liberar"){ await ref.set({situacao:"ativo"}, {merge:true}); aviso("Aparelho liberado"); }
       if(a==="ap-bloquear"){
