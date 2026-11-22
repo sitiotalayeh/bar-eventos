@@ -3520,6 +3520,8 @@ function assinarNuvem2(){
   const ok = (snap)=>{ if(!snap.metadata.fromCache && S.nuvem!=="erro") S.nuvem = "ok"; };
   S.assinaturas.push(S.raiz.onSnapshot((snap)=>{
     S.bloqueado = !!(snap.exists && snap.data().bloqueado);
+    /* lembra a suspensão no aparelho: vale mesmo sem nuvem; só a nuvem desfaz */
+    if(!snap.metadata.fromCache) guardar("suspensa", S.bloqueado);
     desenhar();
   }, ()=>{}));
   assinarAparelhos();
@@ -3776,8 +3778,11 @@ function desenhar(){
   const t = $("tela");
   if(!LICENCA.ok){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = telaAtivacao(); return; }
   if(S.db && (S.devSit==="bloqueado" || S.devSit==="pendente")){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = telaAparelhoTravado(); return; }
-  if(S.bloqueado){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = `<div class="card"><h3>🔒 Licença suspensa</h3>
-    <p class="nota">Esta licença foi suspensa. Fale com o fornecedor do sistema.${PRODUTO.contato? "<br>"+esc(PRODUTO.contato):""}</p></div>`; return; }
+  if(S.bloqueado || (LICENCA.ok && lembrar("suspensa", false) && !(S.db && S.nuvem==="ok"))){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = `<div class="card"><h3>🔒 Licença suspensa</h3>
+    <p class="nota">Esta licença foi suspensa. Fale com o fornecedor do sistema.${PRODUTO.contato? "<br>"+esc(PRODUTO.contato):""}</p>
+    <p class="nota">Seus dados continuam guardados. Quando a licença for reativada, toque abaixo (precisa de internet).</p>
+    <div class="btns"><button class="bt bt-quieto" data-acao="religar-nuvem">Verificar de novo</button>
+      <button class="bt bt-quieto" data-acao="trocar-chave">Usar outra chave</button></div></div>`; return; }
   pintarTopo(); pintarMenu();
   if(!S.evento){ t.innerHTML = telaSemEvento(); return; }
   if(!S.posto){ t.innerHTML = telaPosto(); return; }
