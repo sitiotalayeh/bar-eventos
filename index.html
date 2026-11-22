@@ -265,6 +265,9 @@ textarea.campo{min-height:150px; font-family:ui-monospace,monospace; font-size:1
   border-radius:12px; padding:12px 14px; font-size:13px; box-shadow:var(--sombra);}
 .recibo b{display:block; font-size:14px; font-weight:700;}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
+
+/* o selo de sincronização não cobre o nome do evento */
+.topo{padding-top:34px;}
 </style>
 
 <script>/** @license
@@ -3471,9 +3474,10 @@ function salvarCfg(){
   if(!S.db){ guardar("local.cfg", S.cfg); return Promise.resolve(); }
   return gravarNuvem(S.db.doc("cfg/geral"), S.cfg);
 }
+function semVazios(o){ try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return o; } }
 function gravarNuvem(ref, dados){
   let p;
-  try{ p = dados===null ? ref.delete() : ref.set(dados); }
+  try{ p = dados===null ? ref.delete() : ref.set(semVazios(dados)); }
   catch(e){ falhaGrave(e); return Promise.resolve(); }
   S.pendentes++; pintarSinal();
   /* não espera o servidor: sem internet o Firebase guarda e envia depois */
@@ -3507,6 +3511,8 @@ function iniciarNuvem(){
   try{
     fbApp = fbApp || firebase.initializeApp(FIREBASE);
     const fs = firebase.firestore();
+    /* campos vazios (undefined) não podem derrubar a gravação na nuvem */
+    if(!iniciarNuvem.ajuste){ iniciarNuvem.ajuste = true; try{ fs.settings({ignoreUndefinedProperties:true, merge:true}); }catch(e){} }
     if(!iniciarNuvem.persist){ iniciarNuvem.persist = true; try{ fs.enablePersistence({synchronizeTabs:true}).catch(()=>{}); }catch(e){} }
     S.raiz = fs.collection("licencas").doc(LICENCA.conta);
     S.db = { collection:(n)=>S.raiz.collection(n), doc:(cam)=>{ const [c,d]=cam.split("/"); return S.raiz.collection(c).doc(d); } };
