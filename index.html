@@ -3793,8 +3793,31 @@ function desenhar(){
   else t.innerHTML = telaAjustes();
 }
 
+function boasVindas(nome){
+  folha(`<div class="olho">Bem-vindo</div>
+    <h2 style="font-family:var(--disp);font-size:24px;text-transform:uppercase;margin:4px 0 8px">Obrigado, ${esc(nome)}!</h2>
+    <p class="nota" style="font-size:14px">Sua licença do ${esc(PRODUTO.nome)} está ativa. Preparamos um manual com o seu nome, explicando a instalação e o uso do sistema passo a passo.</p>
+    <div class="btns"><button class="bt bt-ouro" data-acao="pdf-manual">📘 Baixar meu manual (PDF)</button>
+    <button class="bt bt-quieto" data-fechar>Agora não</button></div>
+    <p class="nota">O manual fica sempre em Ajustes > Licença.</p>`);
+}
+/* troca o organizador deste aparelho: guarda os dados locais do atual e traz os do novo, se já existirem */
+function trocarLicenca(nome, chave){
+  const ant = lembrar("licenca", null), contaAnt = ant ? LIC.conta(ant.nome) : "";
+  const manter = new Set(["barev.dev","barev.ordemContas"]);
+  const ks = []; for(let i=0;i<localStorage.length;i++) ks.push(localStorage.key(i));
+  try{
+    if(contaAnt) ks.filter(k=>k && k.startsWith("barev.") && !manter.has(k)).forEach(k=>{
+      localStorage.setItem("barevarq."+contaAnt+"."+k.slice(6), localStorage.getItem(k)); localStorage.removeItem(k); });
+    const pre = "barevarq."+LIC.conta(nome)+".";
+    ks.filter(k=>k && k.startsWith(pre)).forEach(k=>{
+      localStorage.setItem("barev."+k.slice(pre.length), localStorage.getItem(k)); localStorage.removeItem(k); });
+  }catch(e){}
+  guardar("licenca", {nome, chave}); guardar("boasVindas", nome);
+  location.reload();
+}
 function telaAtivacao(){
-  const l = lembrar("licenca", null) || {};
+  const l = S.linkLic || lembrar("licenca", null) || {};
   const msg = LICENCA.motivo==="vencida"
     ? `<p class="nota" style="color:#9a2a1a"><b>A licença venceu em ${esc(dataBR(LICENCA.validade))}.</b> Seus dados continuam guardados neste aparelho. Digite a chave nova para continuar.</p>`
     : LICENCA.motivo==="invalida"
@@ -3842,7 +3865,12 @@ function telaSemEvento(){
       <p class="nota">Cada evento guarda as vendas, as contas e o cardápio dele. Abrir um evento novo não apaga os anteriores.</p>
       <div class="btns"><button class="bt bt-ouro" data-acao="novo-evento">Cadastrar evento</button></div>
     </div>
-    ${S.eventos.length? `<div class="card"><h3>📁 Eventos guardados</h3><div class="lista">${lista}</div></div>`:""}`;
+    ${S.eventos.length? `<div class="card"><h3>📁 Eventos guardados</h3><div class="lista">${lista}</div></div>`:""}
+    <div class="card"><h3>🔑 Licença</h3>
+      <p class="nota">Licenciado para <b>${esc(LICENCA.nome||"")}</b> · ${LICENCA.validade? "válida até "+esc(dataBR(LICENCA.validade)) : "vitalícia"}</p>
+      <div class="btns"><button class="bt bt-quieto" data-acao="pdf-manual">📘 Manual do sistema (PDF)</button>
+        <button class="bt bt-quieto" data-acao="trocar-org">Usar outra licença (outro organizador)</button></div>
+    </div>`;
 }
 function telaPosto(){
   const usados = [...new Set(Object.values(S.blocos).map(b=>b.posto).filter(Boolean))];
@@ -4277,7 +4305,8 @@ function telaAjustes(){
       <div class="item"><span class="cresce">Validade</span><span class="val">${LICENCA.validade? esc(dataBR(LICENCA.validade)) : "vitalícia"}</span></div>
       <div class="item"><span class="cresce">Chave</span><span class="val" style="font-family:ui-monospace,monospace;font-size:12px">${esc(LICENCA.chave||"")}</span></div>
       <div class="btns"><button class="bt bt-quieto" data-acao="trocar-chave">Renovar / trocar chave</button>
-        <button class="bt bt-quieto" data-acao="pdf-manual">📘 Manual do sistema (PDF)</button></div>
+        <button class="bt bt-quieto" data-acao="pdf-manual">📘 Manual do sistema (PDF)</button>
+        <button class="bt bt-quieto" data-acao="trocar-org">Usar outra licença (outro organizador)</button></div>
     </div>
     <p class="nota" style="text-align:center;margin:18px 0 6px">${esc(PRODUTO.nome)} · versão ${esc(PRODUTO.versao)}${PRODUTO.desenvolvedor? "<br>Desenvolvido por "+esc(PRODUTO.desenvolvedor):""}${PRODUTO.contato? " · "+esc(PRODUTO.contato):""}</p>`;
 }
@@ -5513,17 +5542,12 @@ document.addEventListener("click", async (e)=>{
       if(!r.ok){ aviso("<b>Chave não confere</b>Confira o nome e a chave", 4000); return; }
       if(r.validade && r.validade < hoje()){ aviso("<b>Essa chave já venceu</b>em "+esc(dataBR(r.validade)), 4000); return; }
       const anterior = lembrar("licenca", null);
-      if(anterior && LIC.normNome(anterior.nome)!==LIC.normNome(nome) && (S.eventos||[]).length){
-        aviso("<b>Chave de outro organizador</b>Este aparelho já está licenciado para "+esc(anterior.nome), 5000); return; }
+      S.linkLic = null;
+      if(anterior && LIC.normNome(anterior.nome)!==LIC.normNome(nome)){ trocarLicenca(nome, r.chave); return; }
       guardar("licenca", {nome, chave:r.chave}); lerLicenca();
       S.cfg = Object.assign({}, S.cfg, {org:Object.assign({}, (S.cfg&&S.cfg.org)||{}, {nome})}); guardar("local.cfg", S.cfg);
       fechaFolha(); iniciarDados(); desenhar();
-      if(!anterior) setTimeout(()=>folha(`<div class="olho">Bem-vindo</div>
-        <h2 style="font-family:var(--disp);font-size:24px;text-transform:uppercase;margin:4px 0 8px">Obrigado, ${esc(nome)}!</h2>
-        <p class="nota" style="font-size:14px">Sua licença do ${esc(PRODUTO.nome)} está ativa. Preparamos um manual com o seu nome, explicando a instalação e o uso do sistema passo a passo.</p>
-        <div class="btns"><button class="bt bt-ouro" data-acao="pdf-manual">📘 Baixar meu manual (PDF)</button>
-        <button class="bt bt-quieto" data-fechar>Agora não</button></div>
-        <p class="nota">O manual fica sempre em Ajustes > Licença.</p>`), 600);
+      if(!anterior) setTimeout(()=>boasVindas(nome), 600);
       aviso("<b>Ativado</b>"+(r.validade? "Válido até "+esc(dataBR(r.validade)) : "Licença vitalícia")); return;
     }
     if(a==="tirar-logo-org"){ S.cfg = Object.assign({}, S.cfg, {org:Object.assign({}, S.cfg.org||{}, {logo:""})}); salvarCfg(); desenhar(); return; }
@@ -5557,6 +5581,24 @@ document.addEventListener("click", async (e)=>{
       return;
     }
     if(a==="pdf-cardapio"){ pdfCardapio(); return; }
+    if(a==="trocar-org"){
+      folha(`<div class="olho">Licença</div>
+        <h2 style="font-family:var(--disp);font-size:22px;text-transform:uppercase;margin:4px 0 8px">Usar outra licença</h2>
+        <p class="nota">Este aparelho deixa de usar a licença de <b>${esc(LICENCA.nome||"")}</b> e passa para a do outro organizador. Nada é apagado: os dados de cada licença continuam guardados, e dá para voltar depois com o nome e a chave.</p>
+        <input class="campo" id="lic-nome" placeholder="Nome do outro organizador" autocomplete="off" style="margin-top:12px">
+        <input class="campo" id="lic-chave" placeholder="XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" style="margin-top:10px;font-family:ui-monospace,monospace;text-transform:uppercase">
+        <div class="btns"><button class="bt bt-ouro" data-acao="ativar">Trocar de licença</button></div>`); return;
+    }
+    if(a==="ativar-link"){
+      const L = S.linkLic; S.linkLic = null; fechaFolha(); if(!L) return;
+      const r = LIC.conferir(L.nome, L.chave);
+      if(!r.ok){ aviso("<b>Link de ativação inválido</b>Peça um novo ao fornecedor", 5000); return; }
+      if(r.validade && r.validade < hoje()){ aviso("<b>Essa chave já venceu</b>", 4000); return; }
+      if(LICENCA.nome && LIC.normNome(LICENCA.nome)===LIC.normNome(L.nome)){
+        guardar("licenca", {nome:LICENCA.nome, chave:r.chave}); lerLicenca(); iniciarDados(); desenhar();
+        aviso("<b>Chave atualizada</b>"+(r.validade? "Válida até "+esc(dataBR(r.validade)) : "Licença vitalícia"), 4000); return; }
+      trocarLicenca(L.nome.trim().replace(/\s+/g," "), r.chave); return;
+    }
     if(a==="pdf-manual"){ fechaFolha(); pdfManual(); return; }
     if(a==="fichas-escolher"){ folhaFichas(); return; }
     if(a==="fichas-todos"){ document.querySelectorAll("[data-fq]").forEach(i=>i.value = $("fq-todos").value||0); return; }
@@ -5698,7 +5740,33 @@ lerLicenca();
 recalcular();
 desenhar();
 if(S.travado) S.aba = "vender";
+/* link de ativação: ...#ativar=NOME&chave=XXXXX-... */
+function lerLinkAtivacao(){
+  const m = (location.hash||"").match(/^#ativar=([^&]*)&chave=([A-Za-z0-9-]+)/);
+  if(!m) return false;
+  try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
+  let nome = m[1]; try{ nome = decodeURIComponent(nome.replace(/\+/g," ")); }catch(e){}
+  S.linkLic = {nome, chave:m[2].toUpperCase()};
+  return true;
+}
+function perguntarLinkAtivacao(){
+  if(!S.linkLic) return;
+  if(!LICENCA.ok){ desenhar(); return; }   /* tela de ativação já vem preenchida */
+  const L = S.linkLic, mesmo = LIC.normNome(L.nome)===LIC.normNome(LICENCA.nome||"");
+  const r = LIC.conferir(L.nome, L.chave);
+  if(mesmo && r.ok && r.chave===LICENCA.chave){ S.linkLic = null; return; }
+  folha(`<div class="olho">Link de ativação</div>
+    <h2 style="font-family:var(--disp);font-size:22px;text-transform:uppercase;margin:4px 0 8px">${mesmo? "Atualizar a chave?" : "Trocar de licença?"}</h2>
+    <p class="nota" style="font-size:14px">${mesmo? `O link traz uma chave nova para <b>${esc(LICENCA.nome)}</b>.`
+      : `Este aparelho está usando a licença de <b>${esc(LICENCA.nome)}</b>. O link é da licença de <b>${esc(L.nome)}</b>.<br><br>Nada é apagado: os dados de cada licença continuam guardados.`}</p>
+    <div class="btns"><button class="bt bt-ouro" data-acao="ativar-link">${mesmo? "Atualizar chave" : "Trocar para "+esc(L.nome)}</button>
+    <button class="bt bt-quieto" data-fechar>${mesmo? "Agora não" : "Manter "+esc(LICENCA.nome)}</button></div>`);
+}
+lerLinkAtivacao();
 iniciarDados();
+if(S.linkLic && LICENCA.ok) setTimeout(perguntarLinkAtivacao, 500);
+window.addEventListener("hashchange", ()=>{ if(lerLinkAtivacao()) perguntarLinkAtivacao(); });
+if(LICENCA.ok && lembrar("boasVindas", "")){ const n = lembrar("boasVindas",""); guardar("boasVindas",""); setTimeout(()=>boasVindas(n), 700); }
 document.addEventListener("change", async (e)=>{
   const inp = e.target && e.target.closest && e.target.closest("input[data-logo]");
   if(!inp || !inp.files || !inp.files[0]) return;

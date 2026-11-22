@@ -167,8 +167,9 @@ function situacao(l){
   if(l.validade && dias(l.validade) <= 30) return {t:"vence em "+dias(l.validade)+"d", cor:"var(--ambar)", ord:1};
   return {t:"ativa", cor:"var(--verde)", ord:0};
 }
+const linkAtivar = (l)=> SITE + "#ativar=" + encodeURIComponent(l.nome) + "&chave=" + l.chave;
 function mensagem(l){
-  return `Olá! Segue a ativação do *Bar de Eventos*:\n\nNome do organizador: *${l.nome}*\nChave: *${l.chave}*\nValidade: ${l.validade? br(l.validade):"vitalícia"}\n\n1. Abra no Safari (iPhone) ou Chrome (Android): ${SITE}\n2. Toque em Compartilhar > Adicionar à Tela de Início\n3. Digite o nome exatamente como acima e cole a chave\n\nUse a mesma chave em todos os celulares do seu bar: eles ficam sincronizados.\n\nDúvidas e novas aquisições: ${CONTATO.charAt(0).toLowerCase()+CONTATO.slice(1)}`;
+  return `Olá! Segue a ativação do *Bar de Eventos*:\n\nNome do organizador: *${l.nome}*\nChave: *${l.chave}*\nValidade: ${l.validade? br(l.validade):"vitalícia"}\n\n*Ativar com um toque* (abra no Safari no iPhone ou no Chrome no Android):\n${linkAtivar(l)}\n\nDepois de ativar, toque em Compartilhar > Adicionar à Tela de Início.\n\nSe preferir digitar: abra ${SITE} e informe o nome exatamente como acima e a chave.\n\nUse a mesma chave em todos os celulares do seu bar: eles ficam sincronizados.\n\nDúvidas e novas aquisições: ${CONTATO.charAt(0).toLowerCase()+CONTATO.slice(1)}`;
 }
 function zap(l){
   const f = soDig(l.fone); const num = f? (f.length<=11? "55"+f : f) : "";
@@ -232,6 +233,8 @@ function desenhar(){
         ${l.bloqueado? `<button class="verde" data-a="reativar">Reativar</button>` : `<button class="perigo" data-a="suspender">Suspender</button>`}
         <button data-a="editar">Editar</button>
         <button data-a="aparelhos">Aparelhos</button>
+        <button data-a="link" ${l.chave?"":"disabled"}>Copiar link de ativação</button>
+        <button class="perigo" data-a="excluir">Excluir</button>
       </div>
       <div class="aps" hidden></div>
     </div>`; }).join("") || `<div class="vazio">${lista.length? "Nenhuma licença neste filtro." : "Nenhuma licença ainda. Toque em Nova licença ou Adicionar licença já vendida."}</div>`}`;
@@ -341,6 +344,15 @@ document.addEventListener("click", async (e)=>{
   if(!l) return;
   if(a==="zap"){ zap(l); return; }
   if(a==="copiar"){ copiar(l.chave, "Chave copiada"); return; }
+  if(a==="link"){ copiar(linkAtivar(l), "Link de ativação copiado"); return; }
+  if(a==="excluir"){
+    if(l.bloqueado){ aviso("Licença suspensa não pode ser excluída: excluir liberaria o cliente.", 4500); return; }
+    let n = 0; try{ n = (await col.doc(l.id).collection("aparelhos").get()).size; }catch(err){}
+    if(!confirm("Excluir a licença de "+l.nome+" do painel?"+(n? "\n\nAtenção: "+n+" aparelho(s) já usaram esta licença. A chave continua funcionando até a validade; para cortar o acesso, use Suspender." : "\n\nUse para licenças criadas com erro de digitação."))) return;
+    try{ await col.doc(l.id).delete(); aviso("Licença excluída do painel"); }
+    catch(err){ aviso("Não consegui: "+(err.code||err.message), 4000); }
+    return;
+  }
   if(a==="suspender"){
     if(!confirm("Suspender a licença de "+l.nome+"?\n\nTodos os celulares dela travam na hora (ao se conectar). Os dados continuam guardados.")) return;
     try{ await col.doc(l.id).set({bloqueado:true, atualizadaEm:Date.now()}, {merge:true}); aviso("Licença suspensa"); }
