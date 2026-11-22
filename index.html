@@ -3476,7 +3476,8 @@ function recalcular(){
 /* ═══════════ nuvem (Firebase) ═══════════ */
 function salvarCfg(){
   if(!S.db){ guardar("local.cfg", S.cfg); return Promise.resolve(); }
-  return gravarNuvem(S.db.doc("cfg/geral"), S.cfg);
+  const ref = S.db.doc("cfg/geral");
+  return gravarNuvem({set:(d)=>ref.set(d, {merge:true}), delete:()=>ref.delete()}, S.cfg);
 }
 function semVazios(o){ try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return o; } }
 function gravarNuvem(ref, dados){

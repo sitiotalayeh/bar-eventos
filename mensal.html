@@ -3509,7 +3509,8 @@ function recalcular(){
 /* ═══════════ nuvem (Firebase) ═══════════ */
 function salvarCfg(){
   if(!S.db){ guardar("local.cfg", S.cfg); return Promise.resolve(); }
-  return gravarNuvem(S.db.doc("cfg/geral"), S.cfg);
+  const ref = S.db.doc("cfg/geral");
+  return gravarNuvem({set:(d)=>ref.set(d, {merge:true}), delete:()=>ref.delete()}, S.cfg);
 }
 function semVazios(o){ try{ return JSON.parse(JSON.stringify(o)); }catch(e){ return o; } }
 function gravarNuvem(ref, dados){
@@ -3836,18 +3837,32 @@ function iniciarLocal(){
 
 /* cada aparelho trabalha num evento: cliente e aparelho marcado "bar mensal" ficam no mensal;
    o dono/gerente pode trabalhar num evento só neste aparelho (evLocal); os demais seguem o evento aberto para todos */
+function mesAberto(){
+  const cfg = S.cfg||{}, evs = S.eventos||[];
+  const ok = cfg.evMensal && evs.some(e=>e.id===cfg.evMensal && !e.fechado);
+  if(ok || (cfg.evMensal && !S.eventosProntos)) return cfg.evMensal;
+  const abertos = evs.filter(e=>ehMensal(e) && !e.fechado)
+    .sort((a,b)=>String(b.mes||"").localeCompare(String(a.mes||"")) || ((b.criadoEm||0)-(a.criadoEm||0)));
+  return abertos[0]? abertos[0].id : (cfg.evMensal||"");
+}
+/* o dono/gerente corrige sozinho o mês aberto gravado na configuração */
+function repararMes(){
+  if(!S.db || !S.cfgPronto || !S.eventosProntos || papel()!=="gestor") return;
+  const m = mesAberto();
+  if(m && m!==((S.cfg||{}).evMensal)){ S.cfg = Object.assign({}, S.cfg, {evMensal:m}); salvarCfg(); }
+}
 function eventoDoAparelho(){
   const cfg = S.cfg||{};
-  if(papel()==="cliente") return cfg.evMensal||"";
+  if(papel()==="cliente" || papel()==="comanda") return mesAberto();
   const loc = lembrar("evLocal","");
   if(loc && papel()==="gestor"){
     if(!S.eventosProntos || (S.eventos||[]).some(e=>e.id===loc)) return loc;
     guardar("evLocal","");
   }
-  return cfg.evMensal||"";
+  return mesAberto();
 }
-function reavaliarEvento(){ const a = eventoDoAparelho(); if(a !== S.evId) entrarNoEvento(a); }
-function trabalharEm(id){ const atual = (S.cfg&&S.cfg.evMensal)||""; guardar("evLocal", (id && id!==atual)? id : ""); entrarNoEvento(id||atual); S.aba = "vender"; desenhar(); }
+function reavaliarEvento(){ repararMes(); const a = eventoDoAparelho(); if(a !== S.evId) entrarNoEvento(a); }
+function trabalharEm(id){ const atual = mesAberto()||""; guardar("evLocal", (id && id!==atual)? id : ""); entrarNoEvento(id||atual); S.aba = "vender"; desenhar(); }
 const ehMensal = (ev)=> !!(ev && ev.tipo==="mensal");
 function entrarNoEvento(id){
   S.evId = id || "";
@@ -3902,6 +3917,7 @@ function pintarMenu(){
 /* ═══════════ telas ═══════════ */
 function desenhar(){
   const t = $("tela");
+  try{ repararMes(); }catch(e){}
   if(!LICENCA.ok){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = telaAtivacao(); return; }
   const mod = S.modMensal!=null ? S.modMensal : lembrar("modMensal", null);
   const acessoConvidado = S.convite || papel()==="cliente" || papel()==="comanda";
@@ -4166,14 +4182,14 @@ function linkConvite(cv){
   return site + "#convite=" + cv.id + "&n=" + encodeURIComponent(LICENCA.nome||"") + "&k=" + (LICENCA.chave||"");
 }
 function msgConvite(cv){
-  const m = S.eventos.find(e=>e.id===(S.cfg&&S.cfg.evMensal));
+  const m = S.eventos.find(e=>e.id===mesAberto());
   if(cv.tipo==="gerente") return `Olá, ${cv.nome}! 🤠\n\nVocê foi convidado como *gerente* do Bar Mensal${org().nome? " do "+org().nome:""}: vender, cobrar, convidar clientes e fechar o mês.\n\n1. Abra este link no Safari (iPhone) ou Chrome (Android):\n${linkConvite(cv)}\n2. Toque em Compartilhar > Adicionar à Tela de Início\n\nNão repasse este link: ele dá acesso de gerente.`;
   if(cv.tipo==="comanda") return `Link da *comanda fixa* do Bar Mensal${org().nome? " do "+org().nome:""}.\n\nAbra no aparelho que vai ficar no bar (Safari no iPhone/iPad, Chrome no Android):\n${linkConvite(cv)}\n\nDepois toque em Compartilhar > Adicionar à Tela de Início. Cada cliente toca no próprio nome e lança o que pegou.`;
   return `Olá, ${cv.nome}! 🤠\n\nAgora você pode lançar o seu consumo do bar${org().nome? " do "+org().nome:""} pelo seu celular e acompanhar a conta do mês.\n\n1. Abra este link no Safari (iPhone) ou Chrome (Android):\n${linkConvite(cv)}\n2. Toque em Compartilhar > Adicionar à Tela de Início\n\nToda vez que pegar algo, toque no item e em "Lançar na minha conta". No fim do mês, dá para pagar pelo PIX ali mesmo.`;
 }
 function secMensal(){
   if(!S.db) return `<div class="card"><h3>🏠 Bar mensal</h3><p class="nota">Para os clientes lançarem pelo próprio celular, a sincronização precisa estar ligada (Ajustes → Dados e backup).</p></div>`;
-  const mens = S.eventos.find(e=>e.id===(S.cfg&&S.cfg.evMensal));
+  const mens = S.eventos.find(e=>e.id===mesAberto());
   if(!mens) return `<div class="card"><h3>🏠 Bar mensal</h3>
     <p class="nota">Um bar que fica sempre aberto. Cada cliente convidado lança o próprio consumo pelo celular e acompanha a conta do mês. No fim do mês você fecha, cobra pelo WhatsApp e o mês seguinte começa zerado.</p>
     <p class="nota" style="margin-top:8px">Depois de abrir, confira os produtos em <b>Produtos e impressos</b> e a chave PIX em <b>Bar e PIX</b>.</p>
@@ -4237,9 +4253,9 @@ function folhaConvite(cv){
     <p class="nota" style="margin-top:8px">Não mande o link para outra pessoa: ele dá acesso à conta de ${esc(cv.nome)}.</p>`);
 }
 function barraEvento(){
-  if(!admin() || !S.cfg || !S.cfg.evMensal || !S.evento || S.evId===S.cfg.evMensal) return "";
+  if(!admin() || !mesAberto() || !S.evento || S.evId===mesAberto()) return "";
   return `<div class="card" style="border-color:var(--ambar);margin-top:0"><p class="nota" style="margin:0 0 8px">Este aparelho está vendo <b>${esc(S.evento.nome)}</b>, um mês já fechado.</p>
-    <button class="bt bt-quieto" data-acao="trabalhar" data-ev="${esc(S.cfg.evMensal)}">Voltar para o mês atual</button></div>`;
+    <button class="bt bt-quieto" data-acao="trabalhar" data-ev="${esc(mesAberto())}">Voltar para o mês atual</button></div>`;
 }
 function barraEventoAntiga(){
   if(!admin() || !S.cfg || !S.cfg.evMensal) return "";
@@ -6098,7 +6114,7 @@ document.addEventListener("click", async (e)=>{
     if(a==="trabalhar"){ trabalharEm(el.dataset.ev||""); aviso("<b>Trabalhando em</b>"+esc((S.evento&&S.evento.nome)||"")); return; }
     if(a==="mensal-ativar"){ const ev = await abrirMensal(hoje().slice(0,7)); aviso("<b>Bar mensal aberto</b>"+esc(ev.nome), 4000); desenhar(); return; }
     if(a==="mensal-fechar"){
-      const mens = S.eventos.find(e=>e.id===(S.cfg&&S.cfg.evMensal)); if(!mens) return;
+      const mens = S.eventos.find(e=>e.id===mesAberto()); if(!mens) return;
       confirmar("Fechar o mês", `<b>${esc(mens.nome)}</b> fica guardado para cobrar quem ainda deve.<br><br>Os clientes passam a lançar em <b>${esc(nomeMes(proxMes(mens.mes)))}</b>, que começa zerado e com o mesmo cardápio.`,
         "Fechar e abrir "+nomeMes(proxMes(mens.mes)), "mensalfecha:"+mens.id, false); return;
     }
