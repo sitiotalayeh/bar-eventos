@@ -3886,6 +3886,51 @@ const cardOrg = (st)=> `<div class="card"${st}><h3>🏷 Organizador</h3>
       ${blocoLogo("org", logoOrg())}
       <p class="nota" style="margin-top:6px">Aparece nas comandas e relatórios de todos os eventos.</p>
     </div>`;
+/* ── excluir evento ── */
+const podeExcluirEvento = ()=> !S.db || souPrincipal();
+function folhaGerirEventos(){
+  if(!podeExcluirEvento()){ aviso("<b>Só o aparelho do dono</b>Peça ao dono para excluir o evento", 4500); return; }
+  const evs = S.eventos.slice().sort((a,b)=>(b.criadoEm||0)-(a.criadoEm||0));
+  folha(`<div class="olho">Excluir eventos</div>
+    <p class="nota">Escolha o evento que quer apagar. Use para eventos de teste ou que não precisa mais guardar.</p>
+    <div class="lista" style="margin-top:10px">${evs.map(e=>`<div class="item" style="gap:8px;align-items:center">
+      <span class="cresce"><b>${esc(e.nome)}</b><span class="sub">${esc(periodo(e.ini,e.fim)||"sem data")}${e.id===(S.cfg&&S.cfg.ev)? " · aberto agora":""}</span></span>
+      <button class="bt bt-perigo bt-mini" data-acao="excluir-evento" data-ev="${esc(e.id)}">Excluir</button></div>`).join("") || `<p class="nota">Nenhum evento.</p>`}</div>`);
+}
+function folhaExcluirEvento(id){
+  const ev = S.eventos.find(e=>e.id===id); if(!ev) return;
+  const aberto = id===(S.cfg&&S.cfg.ev);
+  folha(`<div class="olho">Excluir evento</div>
+    <h2 style="font-family:var(--disp);font-size:22px;text-transform:uppercase;margin:4px 0 8px">${esc(ev.nome)}</h2>
+    <p class="nota">Apaga de vez as vendas, o fiado, os pagamentos e o cardápio deste evento${S.db? ", em todos os aparelhos":""}. <b>Não dá para desfazer.</b></p>
+    ${aberto? `<p class="nota" style="color:#9a2a1a"><b>É o evento aberto agora.</b> Os aparelhos ficam sem evento até você abrir outro.</p>
+      <div class="btns"><button class="bt bt-quieto" data-acao="backup">Baixar backup antes</button></div>`
+      : `<p class="nota">Quer guardar uma cópia? Abra o evento e use Ajustes > Dados e backup antes de excluir.</p>`}
+    <p class="nota">O cadastro de clientes (nomes e telefones) continua.</p>
+    <label class="rot" for="ex-conf" style="margin-top:10px">Para confirmar, digite EXCLUIR</label>
+    <input class="campo" id="ex-conf" autocomplete="off" autocapitalize="characters" placeholder="EXCLUIR">
+    <div class="btns"><button class="bt bt-perigo" data-acao="excluir-evento-ok" data-ev="${esc(id)}">Excluir evento</button>
+      <button class="bt bt-quieto" data-fechar>Cancelar</button></div>`);
+}
+async function excluirEvento(id){
+  const ev = S.eventos.find(e=>e.id===id); if(!ev) return;
+  if(id===(S.cfg&&S.cfg.ev)){ S.cfg = Object.assign({}, S.cfg, {ev:""}); salvarCfg(); }
+  if(S.evId===id){ guardar("evLocal",""); entrarNoEvento(""); }
+  if(S.eventosNovos) delete S.eventosNovos[id];
+  S.eventos = S.eventos.filter(e=>e.id!==id);
+  if(S.db){
+    for(const c of ["lanc","clientes"]){
+      try{ const snap = await S.db.collection(c).where("ev","==",id).get();
+        snap.docs.forEach(d=>gravarNuvem(S.db.collection(c).doc(d.id), null)); }catch(e){}
+    }
+    gravarNuvem(S.db.collection("eventos").doc(id), null);
+  } else {
+    guardar("local.eventos", (lembrar("local.eventos", [])||[]).filter(e=>e.id!==id));
+  }
+  try{ const ks=[]; for(let i=0;i<localStorage.length;i++) ks.push(localStorage.key(i));
+    ks.filter(k=>k && (k.startsWith("barev.bloco."+id+"__") || k.startsWith("barev.local."+id+".") || k==="barev.enviado."+id)).forEach(k=>localStorage.removeItem(k)); }catch(e){}
+  fechaFolha(); desenhar(); aviso("<b>Evento excluído</b>"+esc(ev.nome), 4000);
+}
 function telaSemEvento(){
   if(!admin()) return `<div class="card"><div class="vazio">Nenhum evento aberto.<br>Peça para o responsável abrir o evento.</div></div>`;
   const lista = S.eventos.map(e=>`<button class="conta" data-abrir-ev="${esc(e.id)}">
@@ -3897,7 +3942,8 @@ function telaSemEvento(){
       <p class="nota">Cada evento guarda as vendas, as contas e o cardápio dele. Abrir um evento novo não apaga os anteriores.</p>
       <div class="btns"><button class="bt bt-ouro" data-acao="novo-evento">Cadastrar evento</button></div>
     </div>
-    ${S.eventos.length? `<div class="card"><h3>📁 Eventos guardados</h3><div class="lista">${lista}</div></div>`:""}
+    ${S.eventos.length? `<div class="card"><h3>📁 Eventos guardados</h3><div class="lista">${lista}</div>
+      <div class="btns"><button class="bt bt-quieto" data-acao="gerir-eventos">🗑 Excluir eventos</button></div></div>`:""}
     <div class="card"><h3>🔑 Licença</h3>
       <p class="nota">Licenciado para <b>${esc(LICENCA.nome||"")}</b> · ${LICENCA.validade? "válida até "+esc(dataBR(LICENCA.validade)) : "vitalícia"}</p>
       <div class="btns"><button class="bt bt-quieto" data-acao="pdf-manual">📘 Manual do sistema (PDF)</button>
@@ -4246,6 +4292,7 @@ function telaAjustes(){
         <button class="conta" data-abrir-ev="${esc(e.id)}"><span class="corpo">
           <span class="nome">${esc(e.nome)}</span><span class="sub">${esc(periodo(e.ini,e.fim)||"sem data")}</span></span>
           <span class="saldo" style="color:var(--latao-sv);font-size:14px">abrir</span></button>`).join("")}</div>`:""}
+      <div class="btns"><button class="bt bt-quieto" data-acao="gerir-eventos">🗑 Excluir eventos</button></div>
     </div>
 
     `;
@@ -5579,6 +5626,11 @@ document.addEventListener("click", async (e)=>{
     if(a==="ordem-valor" || a==="ordem-az"){ guardar("ordemContas", a==="ordem-az"? "az":"valor"); desenhar(); return; }
     if(a==="limpar-cobranca"){ guardar("cobrado."+S.evId, []); folhaCobrar(); return; }
     if(a==="novo-evento"){ folhaEvento(false); return; }
+    if(a==="gerir-eventos"){ folhaGerirEventos(); return; }
+    if(a==="excluir-evento"){ if(podeExcluirEvento()) folhaExcluirEvento(el.dataset.ev); return; }
+    if(a==="excluir-evento-ok"){
+      if((($("ex-conf")||{}).value||"").trim().toUpperCase()!=="EXCLUIR"){ aviso("<b>Digite EXCLUIR</b>para confirmar"); return; }
+      el.disabled = true; await excluirEvento(el.dataset.ev); return; }
     if(a==="ativar"){
       const nome = ($("lic-nome").value||"").trim().replace(/\s+/g," "), chave = $("lic-chave").value||"";
       const r = LIC.conferir(nome, chave);
