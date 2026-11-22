@@ -3524,10 +3524,10 @@ function iniciarNuvem(){
   const auth = firebase.auth();
   let assinado = false;
   auth.onAuthStateChanged((u)=>{
-    if(u && (!assinado || S.nuvem==="erro")){ assinado = true; assinarNuvem(); }
+    if(u && (!assinado || S.nuvem==="erro" || S.semLogin)){ assinado = true; S.semLogin = false; assinarNuvem(); }
   });
   auth.signInAnonymously().then(()=>{ S.erroAuth=""; }).catch((e)=>{ S.erroAuth=(e&&(e.code||e.message))||"falha"; pintarSinal(); });
-  setTimeout(()=>{ if(!assinado){ assinado = true; assinarNuvem(); } }, 3000);
+  setTimeout(()=>{ if(!assinado){ assinado = true; S.semLogin = !auth.currentUser; assinarNuvem(); } }, 3000);
   pintarSinal(); desenhar();
 }
 function assinarNuvem(){ try{ assinarNuvem2(); }catch(e){ falhaGrave(e); } }

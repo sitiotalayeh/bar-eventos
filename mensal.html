@@ -3557,10 +3557,10 @@ function iniciarNuvem(){
   const auth = firebase.auth();
   let assinado = false;
   auth.onAuthStateChanged((u)=>{
-    if(u && (!assinado || S.nuvem==="erro")){ assinado = true; assinarNuvem(); }
+    if(u && (!assinado || S.nuvem==="erro" || S.semLogin)){ assinado = true; S.semLogin = false; assinarNuvem(); }
   });
   auth.signInAnonymously().then(()=>{ S.erroAuth=""; }).catch((e)=>{ S.erroAuth=(e&&(e.code||e.message))||"falha"; pintarSinal(); });
-  setTimeout(()=>{ if(!assinado){ assinado = true; assinarNuvem(); } }, 3000);
+  setTimeout(()=>{ if(!assinado){ assinado = true; S.semLogin = !auth.currentUser; assinarNuvem(); } }, 3000);
   pintarSinal(); desenhar();
 }
 function assinarNuvem(){ try{ assinarNuvem2(); }catch(e){ falhaGrave(e); } }
@@ -3904,9 +3904,11 @@ function desenhar(){
   const t = $("tela");
   if(!LICENCA.ok){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = telaAtivacao(); return; }
   const mod = S.modMensal!=null ? S.modMensal : lembrar("modMensal", null);
-  if(mod!==true){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = mod===false
+  const acessoConvidado = S.convite || papel()==="cliente" || papel()==="comanda";
+  if(mod!==true && !acessoConvidado){ pintarTopo(); $("menu").innerHTML = ""; t.innerHTML = mod===false
     ? `<div class="card"><h3>🏠 Módulo Bar Mensal</h3><p class="nota">O módulo Bar Mensal não está ativo na licença de <b>${esc(LICENCA.nome||"")}</b>.</p>
       <p class="nota">Para contratar: ${esc(PRODUTO.contato||"")}</p>
+      <p class="nota" style="font-size:11px">Conta ${esc(LICENCA.conta||"")}</p>
       <div class="btns"><button class="bt bt-quieto" data-acao="religar-nuvem">Verificar de novo</button>
         <button class="bt bt-quieto" data-acao="trocar-chave">Usar outra chave</button></div></div>`
     : `<div class="card"><h3>Conferindo a licença…</h3><p class="nota">Na primeira vez o Bar Mensal precisa de internet para confirmar que o módulo está ativo na sua licença.</p>
