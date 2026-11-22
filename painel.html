@@ -160,6 +160,57 @@ firebase.initializeApp(FIREBASE);
 const auth = firebase.auth(), db = firebase.firestore();
 const col = db.collection("licencas");
 let lista = [], filtro = "todas", busca = "", parar = null, erroLista = "";
+const apsAbertos = {}, apsDados = {};   /* conta -> unsubscribe / lista de aparelhos */
+function papelAp(x){ return x.principal? "dono" : x.gerente? "gerente" : "comum"; }
+function htmlAps(conta){
+  const aps = apsDados[conta];
+  if(!aps) return "Carregando…";
+  if(!aps.length) return `<div class="nota">Nenhum aparelho conectado ainda.</div>`;
+  const temDono = aps.some(x=>x.principal);
+  return (temDono? "" : `<div class="erro" style="margin:0 0 6px">Sem aparelho de dono. Escolha um abaixo.</div>`) + aps.map(x=>{
+    const sit = x.situacao||"ativo", pp = papelAp(x);
+    const cor = sit==="bloqueado"? "var(--vermelho)" : sit==="pendente"? "var(--ambar)" : "var(--verde)";
+    return `<div style="padding:10px 0;border-bottom:1px solid #f1e9da" data-apid="${esc(x.id)}">
+      <div style="display:flex;gap:8px;align-items:center">
+        <b style="flex:1">${esc(x.posto||"sem nome")}</b>
+        <span class="selo" style="background:${cor}">${sit==="ativo"?"liberado":sit==="pendente"?"aguardando":"bloqueado"}</span>
+      </div>
+      <div class="nota">${esc(x.modelo||"")} · visto ${quando(x.visto)}</div>
+      <div class="acoes" style="margin-top:6px;align-items:center">
+        <span class="nota" style="font-weight:600">Função:</span>
+        <select data-ap-papel style="width:auto;padding:7px 8px;font-size:13px;border-radius:9px">
+          ${[["dono","Dono"],["gerente","Gerente"],["comum","Comum (só vende)"]].map(([k,n])=>`<option value="${k}" ${k===pp?"selected":""}>${n}</option>`).join("")}
+        </select>
+        ${sit!=="ativo"? `<button class="verde" data-a="ap-liberar">Liberar</button>`:""}
+        ${sit!=="bloqueado"? `<button class="perigo" data-a="ap-bloquear">Bloquear</button>`:""}
+        <button data-a="ap-excluir">Excluir</button>
+      </div></div>`; }).join("");
+}
+function abrirAps(conta){
+  if(apsAbertos[conta]) return;
+  apsAbertos[conta] = col.doc(conta).collection("aparelhos").onSnapshot((s)=>{
+    apsDados[conta] = s.docs.map(d=>Object.assign({id:d.id}, d.data()))
+      .sort((x,y)=>((y.principal?2:y.gerente?1:0)-(x.principal?2:x.gerente?1:0)) || ((y.visto||0)-(x.visto||0)));
+    const box = document.querySelector(`.lic[data-conta="${conta}"] .aps`); if(box) box.innerHTML = htmlAps(conta);
+  }, (err)=>{ const box = document.querySelector(`.lic[data-conta="${conta}"] .aps`); if(box) box.textContent = "Não consegui ler os aparelhos: "+(err.code||err.message); });
+}
+function fecharAps(conta){ if(apsAbertos[conta]){ apsAbertos[conta](); delete apsAbertos[conta]; } }
+async function mudarPapel(conta, id, novo){
+  const aps = apsDados[conta]||[], alvo = aps.find(x=>x.id===id); if(!alvo) return;
+  const ref = col.doc(conta).collection("aparelhos");
+  try{
+    if(novo==="dono"){
+      const atual = aps.find(x=>x.principal && x.id!==id);
+      await ref.doc(id).set({principal:true, gerente:true, situacao:"ativo"}, {merge:true});
+      if(atual) await ref.doc(atual.id).set({principal:false, gerente:true}, {merge:true});
+      aviso(esc(alvo.posto||"Aparelho")+" agora é o dono"+(atual? " · "+esc(atual.posto||"o anterior")+" virou gerente":""), 4000);
+    } else {
+      if(alvo.principal){ aviso("Para tirar o dono, escolha antes outro aparelho como Dono.", 4500); const box=document.querySelector(`.lic[data-conta="${conta}"] .aps`); if(box) box.innerHTML = htmlAps(conta); return; }
+      await ref.doc(id).set({principal:false, gerente: novo==="gerente"}, {merge:true});
+      aviso(esc(alvo.posto||"Aparelho")+" agora é "+(novo==="gerente"?"gerente":"comum"));
+    }
+  }catch(err){ aviso("Não consegui: "+(err.code||err.message), 4000); }
+}
 
 function situacao(l){
   if(l.bloqueado) return {t:"suspensa", cor:"var(--vermelho)", ord:3};
@@ -236,7 +287,7 @@ function desenhar(){
         <button data-a="link" ${l.chave?"":"disabled"}>Copiar link de ativação</button>
         <button class="perigo" data-a="excluir">Excluir</button>
       </div>
-      <div class="aps" hidden></div>
+      <div class="aps" ${apsAbertos[l.id]? "" : "hidden"}>${apsAbertos[l.id]? htmlAps(l.id) : ""}</div>
     </div>`; }).join("") || `<div class="vazio">${lista.length? "Nenhuma licença neste filtro." : "Nenhuma licença ainda. Toque em Nova licença ou Adicionar licença já vendida."}</div>`}`;
   const bi = $("busca"); bi.oninput = ()=>{ busca = bi.value; const pos = bi.selectionStart; desenhar(); const n=$("busca"); n.focus(); try{ n.setSelectionRange(pos,pos); }catch(e){} };
 }
@@ -272,6 +323,13 @@ function formLicenca(titulo, l, botao, acao){
 }
 function pintaVal(){ const v=$("f-val"), t=$("f-valtxt"); if(v&&t) t.textContent = v.value? "Válida até "+br(v.value) : "Vitalícia (sem data de vencimento)"; }
 document.addEventListener("input", e=>{ if(e.target.id==="f-val") pintaVal(); });
+document.addEventListener("change", e=>{
+  const sel = e.target.closest && e.target.closest("[data-ap-papel]"); if(!sel) return;
+  const conta = sel.closest("[data-conta]").dataset.conta, id = sel.closest("[data-apid]").dataset.apid;
+  const novo = sel.value, x = (apsDados[conta]||[]).find(y=>y.id===id);
+  if(novo==="dono" && !confirm("Tornar "+((x&&x.posto)||"este aparelho")+" o DONO?\n\nO dono atual vira gerente.")){ sel.value = papelAp(x||{}); return; }
+  mudarPapel(conta, id, novo);
+});
 
 async function salvarNova(){
   const nome = ($("f-nome").value||"").trim().replace(/\s+/g," "), v = $("f-val").value;
@@ -381,14 +439,21 @@ document.addEventListener("click", async (e)=>{
   }
   if(a==="aparelhos"){
     const box = card.querySelector(".aps");
-    if(!box.hidden){ box.hidden = true; return; }
-    box.hidden = false; box.innerHTML = "Carregando…";
+    if(apsAbertos[l.id]){ fecharAps(l.id); box.hidden = true; return; }
+    box.hidden = false; box.innerHTML = "Carregando…"; abrirAps(l.id); return;
+  }
+  if(a==="ap-liberar" || a==="ap-bloquear" || a==="ap-excluir"){
+    const id = el.closest("[data-apid]").dataset.apid, x = (apsDados[l.id]||[]).find(y=>y.id===id); if(!x) return;
+    const ref = col.doc(l.id).collection("aparelhos").doc(id);
     try{
-      const s = await col.doc(l.id).collection("aparelhos").get();
-      const aps = s.docs.map(d=>d.data()).sort((x,y)=>(y.visto||0)-(x.visto||0));
-      box.innerHTML = aps.length? aps.map(x=>`<div><b>${esc(x.posto||"sem nome")}</b> · ${esc(x.principal?"dono":x.gerente?"gerente":(x.situacao||"ativo")==="ativo"?"liberado":x.situacao)} · ${esc(x.modelo||"")} · visto ${quando(x.visto)}</div>`).join("")
-        : "Nenhum aparelho conectado ainda.";
-    }catch(err){ box.textContent = "Não consegui ler os aparelhos: "+(err.code||err.message); }
+      if(a==="ap-liberar"){ await ref.set({situacao:"ativo"}, {merge:true}); aviso("Aparelho liberado"); }
+      if(a==="ap-bloquear"){
+        if(!confirm("Bloquear "+(x.posto||"este aparelho")+"?"+(x.principal? "\n\nAtenção: é o aparelho do DONO. Ele só volta digitando a senha do responsável ou se você liberar aqui." : ""))) return;
+        await ref.set({situacao:"bloqueado"}, {merge:true}); aviso("Aparelho bloqueado"); }
+      if(a==="ap-excluir"){
+        if(!confirm("Excluir "+(x.posto||"este aparelho")+" da lista?\n\nSe ele abrir o sistema de novo, volta a aparecer"+(x.principal? ".\n\nAtenção: é o aparelho do DONO; a licença fica sem dono até você escolher outro." : " (aguardando liberação, se a liberação estiver ligada)."))) return;
+        await ref.delete(); aviso("Aparelho excluído da lista"); }
+    }catch(err){ aviso("Não consegui: "+(err.code||err.message), 4000); }
     return;
   }
 });
