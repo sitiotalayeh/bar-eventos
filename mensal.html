@@ -3331,6 +3331,32 @@ const S = {
   carrinho:{}, cat:"Todos", aba:"vender", pendentes:0, busca:"",
   assinaturas:[], prontoCfg:false, prontoLanc:false
 };
+/* iPhone: o app da tela de início não enxerga o que o Safari guardou. A identidade do aparelho vai no endereço
+   (válida por 1 hora e renovada sempre que o sistema é aberto), para o ícone continuar sendo o MESMO aparelho. */
+const EH_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1);
+(function adotarIdentidade(){
+  try{
+    const q = new URLSearchParams(location.search), ap = q.get("ap");
+    if(!ap || lembrar("dev","")) return;
+    const [dev, ts] = ap.split("."); const idade = Date.now() - parseInt(ts||"0", 36);
+    if(!/^d[A-Za-z0-9_-]{4,}$/.test(dev) || !(idade>=0 && idade<3600000)) return;
+    guardar("dev", dev);
+    const nome = q.get("n"), chave = q.get("k");
+    if(nome && chave && !lembrar("licenca", null)) guardar("licenca", {nome, chave});
+    if(q.get("p") && !lembrar("posto","")) guardar("posto", q.get("p"));
+    guardar("adotado", Date.now());
+  }catch(e){}
+})();
+function marcarEndereco(){
+  try{
+    if(!EH_IOS || navigator.standalone || !LICENCA.ok || !S.dev) return;
+    const u = location.pathname + "?ap=" + S.dev + "." + Date.now().toString(36) + "&n=" + encodeURIComponent(LICENCA.nome||"")
+      + "&k=" + encodeURIComponent(LICENCA.chave||"") + (S.posto? "&p=" + encodeURIComponent(S.posto) : "");
+    history.replaceState(null, "", u + location.hash);
+  }catch(e){}
+}
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) marcarEndereco(); });
+setInterval(marcarEndereco, 5*60*1000);
 S.dev = lembrar("dev","") || ("d"+novoId());
 guardar("dev", S.dev);
 S.posto = lembrar("posto","");
@@ -3635,6 +3661,9 @@ function tentarConvite(){
   const tok = S.convite;
   S.db.collection("convites").doc(tok).get().then(async (snap)=>{
     const eu = meuAparelho();
+    const antigo = snap.exists && snap.data().usadoPor && snap.data().usadoPor!==S.dev ? snap.data().usadoPor : "";
+    const tirarAntigo = ()=>{ if(!antigo) return; const a = (S.aparelhos||[]).find(x=>x.id===antigo);
+      if(!a || (!a.principal && (a.convite===tok || a.cliente || a.comanda))) refAparelho(antigo).delete().catch(()=>{}); };
     if(!snap.exists || snap.data().revogado){ aviso("<b>Convite inválido ou cancelado</b>Peça um novo convite ao responsável", 6000); }
     else if(eu && (eu.principal || (eu.gerente && snap.data().tipo!=="gerente"))){ aviso("<b>Este aparelho é de gestão</b>O convite não foi usado aqui", 6000); }
     else if(snap.data().tipo==="gerente" || snap.data().tipo==="comanda"){
@@ -3644,7 +3673,7 @@ function tentarConvite(){
       try{
         await refAparelho().set({dev:S.dev, posto:S.posto, modelo:modeloAparelho(), visto:Date.now(), criado:(eu&&eu.criado)||Date.now(),
           situacao:"ativo", cliente:false, gerente:ger, principal:false, comanda:!ger, convite:tok}, {merge:true});
-        S.db.collection("convites").doc(tok).set({usadoPor:S.dev, usadoEm:Date.now()}, {merge:true}).catch(()=>{});
+        S.db.collection("convites").doc(tok).set({usadoPor:S.dev, usadoEm:Date.now()}, {merge:true}).catch(()=>{}); tirarAntigo();
         aviso(ger? "<b>Bem-vindo, "+esc(cv.nome)+"!</b>Você entrou como gerente" : "<b>Comanda fixa pronta</b>Cada cliente toca no próprio nome", 6000);
       }catch(e){ aviso("<b>Não consegui ativar o convite</b>Confira a internet e abra o link de novo", 6000); }
     }
@@ -3655,8 +3684,8 @@ function tentarConvite(){
       S.registrarDepois = false;
       try{
         await refAparelho().set({dev:S.dev, posto:S.posto, modelo:modeloAparelho(), visto:Date.now(), criado:(eu&&eu.criado)||Date.now(),
-          situacao:"ativo", cliente:true, cliSlug:cv.slug, cliNome:cv.nome, gerente:false, principal:false, local:""}, {merge:true});
-        S.db.collection("convites").doc(tok).set({usadoPor:S.dev, usadoEm:Date.now()}, {merge:true}).catch(()=>{});
+          situacao:"ativo", cliente:true, convite:tok, cliSlug:cv.slug, cliNome:cv.nome, gerente:false, principal:false, local:""}, {merge:true});
+        S.db.collection("convites").doc(tok).set({usadoPor:S.dev, usadoEm:Date.now()}, {merge:true}).catch(()=>{}); tirarAntigo();
         aviso("<b>Bem-vindo, "+esc(cv.nome)+"!</b>Toque no que pegar para lançar na sua conta", 6000);
       }catch(e){ aviso("<b>Não consegui ativar o convite</b>Confira a internet e abra o link de novo", 6000); }
     }
@@ -3753,6 +3782,7 @@ function cardAparelhos(){
           ${sit==="ativo" && souPrincipal() && !a.cliente? `<button class="bt bt-quieto bt-mini" data-ap="fazerdono:${esc(a.id)}">Tornar gerente</button>`:""}
           ${sit==="ativo" && souPrincipal() && !a.cliente? `<button class="bt bt-quieto bt-mini" data-ap="passardono:${esc(a.id)}">Passar dono</button>`:""}
           
+          ${sit==="ativo" && !a.cliente && !a.gerente? `<button class="bt bt-quieto bt-mini" data-ap="cliente:${esc(a.id)}">Tornar cliente</button>`:""}
           ${sit==="ativo" && !a.cliente? `<button class="bt bt-quieto bt-mini" data-ap="comanda:${esc(a.id)}">${a.comanda? "Voltar a vender" : "Virar comanda fixa"}</button>`:""}
           <button class="bt bt-quieto bt-mini" data-ap="remover:${esc(a.id)}">Remover</button>`;
       }
@@ -3821,6 +3851,7 @@ async function enviarLocaisParaNuvem(){
 
 /* ═══════════ dados locais ═══════════ */
 function iniciarDados(){
+  setTimeout(marcarEndereco, 1500);
   S.assinaturas.forEach(a=>{ try{ a(); }catch(e){} }); S.assinaturas = [];
   S.db = null; S.raiz = null; S.bloqueado = false; S.pendentes = 0; S.devSit = ""; S.aparelhos = []; S.cfgPronto = false; S.registrarDepois = false; S.apPronto = false; clearInterval(S.pulso);
   if(querNuvem()) iniciarNuvem(); else iniciarLocal();
@@ -5927,6 +5958,16 @@ document.addEventListener("click", async (e)=>{
     const ap = (S.aparelhos||[]).find(x=>x.id===id); const nome = esc((ap&&ap.posto)||"sem nome");
     if(id===S.dev) return;
     if(ap && ap.principal){ aviso("<b>Aparelho do dono</b>Ninguém mexe nele", 4000); return; }
+    if(op==="cliente"){
+      const nomes = [...new Set([...(S.pessoas||[]).map(x=>x.nome), ...(S.convites||[]).filter(c=>(c.tipo||"cliente")==="cliente").map(c=>c.nome)])].filter(Boolean).sort((x,y)=>x.localeCompare(y,"pt-BR"));
+      folha(`<div class="olho">Tornar cliente</div>
+        <h2 style="font-family:var(--disp);font-size:22px;margin:4px 0 8px">${esc(ap.posto||"Aparelho")}</h2>
+        <p class="nota">Este aparelho passa a ver só a conta do cliente escolhido e a lançar o próprio consumo.</p>
+        <label class="rot" for="tc-nome" style="margin-top:10px">Conta de qual cliente?</label>
+        <input class="campo" id="tc-nome" list="tc-lista" value="${esc(ap.posto||"")}" autocomplete="off">
+        <datalist id="tc-lista">${nomes.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>
+        <div class="btns"><button class="bt bt-ok" data-acao="ap-cliente-ok" data-id="${esc(id)}">Tornar cliente</button>
+          <button class="bt bt-quieto" data-fechar>Cancelar</button></div>`); return; }
     if(op==="comanda"){ const liga = !(ap && ap.comanda); refAparelho(id).set({comanda:liga}, {merge:true}).catch(()=>{});
       aviso("<b>"+nome+"</b>"+(liga? "agora é a comanda fixa do bar" : "volta a vender normalmente")); return; }
     if(op==="local"){ refAparelho(id).set({local: (ap && ap.local==="mensal")? "" : "mensal"}, {merge:true}).catch(()=>{});
@@ -6061,6 +6102,12 @@ document.addEventListener("click", async (e)=>{
       if(el.dataset.pagar){ folhaPagar(total, S.evId, cli); return; }
       aviso(`<b>Lançado na sua conta</b>R$ ${fmt(total)} · dá para desfazer por ${DESFAZER_MIN} min`, 3500); return;
     }
+    if(a==="ap-cliente-ok"){
+      const nome = ($("tc-nome").value||"").trim().replace(/\s+/g," "); if(!nome){ aviso("<b>Digite o nome do cliente</b>"); return; }
+      const sl = slug(nome); const pe = S.pessoas.find(x=>x.slug===sl) || (S.pessoas||[]).find(x=>slug(x.nome)===sl);
+      const nm = pe? pe.nome : nome; if(!pe) salvarPessoa({slug:sl, nome:nm, fone:""});
+      refAparelho(el.dataset.id).set({cliente:true, cliSlug:sl, cliNome:nm, gerente:false, principal:false, comanda:false, local:""}, {merge:true}).catch(()=>{});
+      fechaFolha(); aviso("<b>Agora é cliente</b>conta de "+esc(nm), 4000); return; }
     if(a==="cmd-cli"){ S.cmdCli = {slug:el.dataset.slug, nome:el.dataset.nome}; S.carrinho = {}; S.cat = "Todos"; desenhar(); try{ window.scrollTo(0,0); }catch(e){} return; }
     if(a==="cmd-sair"){ S.cmdCli = null; S.carrinho = {}; desenhar(); return; }
     if(a==="cmd-novo"){

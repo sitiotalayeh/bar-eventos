@@ -3298,6 +3298,32 @@ const S = {
   carrinho:{}, cat:"Todos", aba:"vender", pendentes:0, busca:"",
   assinaturas:[], prontoCfg:false, prontoLanc:false
 };
+/* iPhone: o app da tela de início não enxerga o que o Safari guardou. A identidade do aparelho vai no endereço
+   (válida por 1 hora e renovada sempre que o sistema é aberto), para o ícone continuar sendo o MESMO aparelho. */
+const EH_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1);
+(function adotarIdentidade(){
+  try{
+    const q = new URLSearchParams(location.search), ap = q.get("ap");
+    if(!ap || lembrar("dev","")) return;
+    const [dev, ts] = ap.split("."); const idade = Date.now() - parseInt(ts||"0", 36);
+    if(!/^d[A-Za-z0-9_-]{4,}$/.test(dev) || !(idade>=0 && idade<3600000)) return;
+    guardar("dev", dev);
+    const nome = q.get("n"), chave = q.get("k");
+    if(nome && chave && !lembrar("licenca", null)) guardar("licenca", {nome, chave});
+    if(q.get("p") && !lembrar("posto","")) guardar("posto", q.get("p"));
+    guardar("adotado", Date.now());
+  }catch(e){}
+})();
+function marcarEndereco(){
+  try{
+    if(!EH_IOS || navigator.standalone || !LICENCA.ok || !S.dev) return;
+    const u = location.pathname + "?ap=" + S.dev + "." + Date.now().toString(36) + "&n=" + encodeURIComponent(LICENCA.nome||"")
+      + "&k=" + encodeURIComponent(LICENCA.chave||"") + (S.posto? "&p=" + encodeURIComponent(S.posto) : "");
+    history.replaceState(null, "", u + location.hash);
+  }catch(e){}
+}
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) marcarEndereco(); });
+setInterval(marcarEndereco, 5*60*1000);
 S.dev = lembrar("dev","") || ("d"+novoId());
 guardar("dev", S.dev);
 S.posto = lembrar("posto","");
@@ -3748,6 +3774,7 @@ async function enviarLocaisParaNuvem(){
 
 /* ═══════════ dados locais ═══════════ */
 function iniciarDados(){
+  setTimeout(marcarEndereco, 1500);
   S.assinaturas.forEach(a=>{ try{ a(); }catch(e){} }); S.assinaturas = [];
   S.db = null; S.raiz = null; S.bloqueado = false; S.pendentes = 0; S.devSit = ""; S.aparelhos = []; S.cfgPronto = false; S.registrarDepois = false; S.apPronto = false; clearInterval(S.pulso);
   if(querNuvem()) iniciarNuvem(); else iniciarLocal();
