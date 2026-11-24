@@ -167,7 +167,8 @@ const contaDe = (k)=> k.split("#")[0], ehM = (k)=> /#m$/.test(k);
 const colAps = (k)=> col.doc(contaDe(k)).collection(ehM(k)? "m_aparelhos" : "aparelhos");
 const boxAps = (k)=> document.querySelector(`.aps[data-k="${k}"]`);
 const temMensal = (l)=> !!(l && l.modulos && l.modulos.mensal);
-function papelAp(x){ return x.cliente? "cliente" : x.principal? "dono" : x.gerente? "gerente" : "comum"; }
+function papelAp(x){ return x.cliente? "cliente" : x.principal? "dono" : x.gerente? "gerente" : x.comanda? "comanda" : "comum"; }
+const slugP = (s)=>String(s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,60);
 function htmlAps(conta){
   const aps = apsDados[conta];
   const tit = `<div style="border:0;font-weight:700;padding:0 0 4px">${ehM(conta)? "🏠 Aparelhos do Bar Mensal" : "🎪 Aparelhos do Bar de Eventos"}</div>`;
@@ -187,10 +188,13 @@ function htmlAps2(conta, aps){
       </div>
       <div class="nota">${esc(x.modelo||"")} · visto ${quando(x.visto)}</div>
       <div class="acoes" style="margin-top:6px;align-items:center">
-        ${x.cliente? `<span class="nota" style="font-weight:600">Cliente do bar mensal: ${esc(x.cliNome||"")}</span>` : `<span class="nota" style="font-weight:600">Função:</span>
+        <span class="nota" style="font-weight:600">Função:</span>
         <select data-ap-papel style="width:auto;padding:7px 8px;font-size:13px;border-radius:9px">
-          ${[["dono","Dono"],["gerente","Gerente"],["comum","Comum (só vende)"]].map(([k,n])=>`<option value="${k}" ${k===pp?"selected":""}>${n}</option>`).join("")}
-        </select>`}
+          ${[["dono","Dono"],["gerente","Gerente"],["comum","Comum (só vende)"]]
+            .concat([["comanda","Comanda fixa do bar"],["cliente","Cliente"]])
+            .map(([k,n])=>`<option value="${k}" ${k===pp?"selected":""}>${n}</option>`).join("")}
+        </select>
+        ${x.cliente? `<span class="nota" style="width:100%">Conta de <b>${esc(x.cliNome||"")}</b></span>`:""}
         ${sit!=="ativo"? `<button class="verde" data-a="ap-liberar">Liberar</button>`:""}
         ${sit!=="bloqueado"? `<button class="perigo" data-a="ap-bloquear">Bloquear</button>`:""}
         <button data-a="ap-excluir">Excluir</button>
@@ -211,13 +215,21 @@ async function mudarPapel(conta, id, novo){
   try{
     if(novo==="dono"){
       const atual = aps.find(x=>x.principal && x.id!==id);
-      await ref.doc(id).set({principal:true, gerente:true, situacao:"ativo"}, {merge:true});
+      await ref.doc(id).set({principal:true, gerente:true, cliente:false, comanda:false, situacao:"ativo"}, {merge:true});
       if(atual) await ref.doc(atual.id).set({principal:false, gerente:true}, {merge:true});
       aviso(esc(alvo.posto||"Aparelho")+" agora é o dono"+(atual? " · "+esc(atual.posto||"o anterior")+" virou gerente":""), 4000);
+    } else if(novo==="cliente"){
+      if(alvo.principal){ aviso("Para tirar o dono, escolha antes outro aparelho como Dono.", 4500); const box=boxAps(conta); if(box) box.innerHTML = htmlAps(conta); return; }
+      const nome = (prompt("Conta de qual cliente?\n\nDigite o nome como está no Fiado.", alvo.cliNome||alvo.posto||"")||"").trim().replace(/\s+/g," ");
+      if(!nome){ const box=boxAps(conta); if(box) box.innerHTML = htmlAps(conta); return; }
+      const sl = slugP(nome);
+      await ref.doc(id).set({cliente:true, cliSlug:sl, cliNome:nome, gerente:false, principal:false, comanda:false, local:"", situacao:"ativo"}, {merge:true});
+      col.doc(contaDe(conta)).collection(ehM(conta)? "m_pessoas" : "pessoas").doc(sl).set({slug:sl, nome, ts:Date.now()}, {merge:true}).catch(()=>{});
+      aviso(esc(alvo.posto||"Aparelho")+" agora é cliente · conta de "+esc(nome), 4000);
     } else {
       if(alvo.principal){ aviso("Para tirar o dono, escolha antes outro aparelho como Dono.", 4500); const box=boxAps(conta); if(box) box.innerHTML = htmlAps(conta); return; }
-      await ref.doc(id).set({principal:false, gerente: novo==="gerente"}, {merge:true});
-      aviso(esc(alvo.posto||"Aparelho")+" agora é "+(novo==="gerente"?"gerente":"comum"));
+      await ref.doc(id).set({principal:false, gerente: novo==="gerente", comanda: novo==="comanda", cliente:false}, {merge:true});
+      aviso(esc(alvo.posto||"Aparelho")+" agora é "+({gerente:"gerente", comanda:"a comanda fixa do bar"}[novo]||"comum"));
     }
   }catch(err){ aviso("Não consegui: "+(err.code||err.message), 4000); }
 }
