@@ -3987,8 +3987,9 @@ async function excluirEvento(id){
 const DESFAZER_MIN = 10;
 function meuCliente(){
   const eu = meuAparelho()||{};
+  if(eu.cliQuem!==undefined) guardar("cliQuem", eu.cliQuem||"");
   if(eu.cliSlug){ if(lembrar("cliSlug","")!==eu.cliSlug){ guardar("cliSlug", eu.cliSlug); guardar("cliNome", eu.cliNome||""); } }
-  return {slug: eu.cliSlug || lembrar("cliSlug",""), nome: eu.cliNome || lembrar("cliNome","")};
+  return {slug: eu.cliSlug || lembrar("cliSlug",""), nome: eu.cliNome || lembrar("cliNome",""), quem: eu.cliQuem || lembrar("cliQuem","")};
 }
 /* soma a conta de um cliente a partir dos lançamentos de um evento */
 function contaEm(itensEv, slugC){
@@ -3998,6 +3999,13 @@ function contaEm(itensEv, slugC){
   const pagou = mov.filter(e=>e.tipo==="pagamento").reduce((s,e)=>s+e.total,0);
   return {mov, deve, pagou, saldo:deve-pagou};
 }
+/* conta da família: mostra quem lançou, quando não foi o titular */
+function quemLancou(e){
+  const q = String(e.posto||"").replace(/^Cliente · /,"");
+  if(!e.auto || e.comanda || !q) return "";
+  const tit = (papel()==="cliente")? meuCliente().nome : "";
+  return slug(q)===slug(tit||e.cliNome||"")? "" : " · por "+esc(q);
+}
 function linhasMov(mov, podeDesfazer){
   if(!mov.length) return `<p class="nota" style="margin-top:8px">Nada lançado ainda.</p>`;
   return mov.map(e=>{
@@ -4005,7 +4013,7 @@ function linhasMov(mov, podeDesfazer){
     const desc = pag? "Pagamento · "+nomeForma(e.forma) : (e.itens||[]).map(i=>i.q+"× "+i.n).join(", ");
     const pode = podeDesfazer && !pag && e.dev===S.dev && (Date.now()-e.ts) < DESFAZER_MIN*60000;
     return `<div class="item" style="align-items:flex-start;gap:8px">
-      <span class="cresce">${esc(desc)}<span class="sub">${esc(dataHora(e.ts))}${e.comanda? " · comanda do bar" : (e.auto||pag)? "":" · lançado no balcão"}</span></span>
+      <span class="cresce">${esc(desc)}<span class="sub">${esc(dataHora(e.ts))}${quemLancou(e)}${e.comanda? " · comanda do bar" : (e.auto||pag)? "":" · lançado no balcão"}</span></span>
       <span class="val" style="${pag?"color:var(--verde)":""}">${pag?"− ":""}${fmt(e.total)}</span>
       ${pode? `<button class="bt bt-quieto bt-mini" data-acao="cli-desfaz" data-id="${esc(e.id)}">Desfazer</button>`:""}</div>`;
   }).join("");
@@ -4108,7 +4116,7 @@ function telaCliente(){
   const anteriores = S.eventos.filter(e=>e.id!==S.evId).sort((a,b)=>(b.criadoEm||0)-(a.criadoEm||0)).slice(0,12);
   return `<div class="card" style="margin-top:0">
       <div class="olho">${esc(S.evento.nome)}</div>
-      <h3 style="margin:2px 0 10px">Olá, ${esc(cli.nome||"cliente")}!</h3>
+      <h3 style="margin:2px 0 10px">Olá, ${esc(cli.quem||cli.nome||"cliente")}!${cli.quem? `<span class="nota" style="display:block;font-weight:500;font-size:13px">Conta de ${esc(cli.nome)}, compartilhada</span>`:""}</h3>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center">
         <div><div class="olho">consumo</div><b style="font-size:18px">R$ ${fmt(conta.deve)}</b></div>
         <div><div class="olho">pago</div><b style="font-size:18px;color:var(--verde)">R$ ${fmt(conta.pagou)}</b></div>
@@ -4157,7 +4165,7 @@ function linkConvite(cv){
 function msgConvite(cv){
   if(cv.tipo==="gerente") return `Olá, ${cv.nome}! 🤠\n\nVocê foi convidado como *gerente* do bar${org().nome? " do "+org().nome:""}: vender, cobrar e convidar clientes.\n\n1. Abra este link no Safari (iPhone) ou Chrome (Android):\n${linkConvite(cv)}\n2. Toque em Compartilhar > Adicionar à Tela de Início\n\nNão repasse este link: ele dá acesso de gerente.`;
   if(cv.tipo==="comanda") return `Link da *comanda fixa* do bar${org().nome? " do "+org().nome:""}.\n\nAbra no aparelho que vai ficar no bar (Safari no iPhone/iPad, Chrome no Android):\n${linkConvite(cv)}\n\nDepois toque em Compartilhar > Adicionar à Tela de Início. Cada cliente toca no próprio nome e lança o que pegou.`;
-  return `Olá, ${cv.nome}! 🤠\n\nAgora você pode lançar o seu consumo do bar${org().nome? " do "+org().nome:""} pelo seu celular e acompanhar a sua conta.\n\n1. Abra este link no Safari (iPhone) ou Chrome (Android):\n${linkConvite(cv)}\n2. Toque em Compartilhar > Adicionar à Tela de Início\n\nToda vez que pegar algo, toque no item e em "Lançar na minha conta". Dá para pagar pelo PIX ali mesmo, na hora ou no fim do evento.`;
+  return `Olá, ${cv.quem||cv.nome}! 🤠\n\n${cv.quem? "Você vai lançar na conta de *"+cv.nome+"*.\n\n" : ""}Agora você pode lançar o seu consumo do bar${org().nome? " do "+org().nome:""} pelo seu celular e acompanhar a sua conta.\n\n1. Abra este link no Safari (iPhone) ou Chrome (Android):\n${linkConvite(cv)}\n2. Toque em Compartilhar > Adicionar à Tela de Início\n\nToda vez que pegar algo, toque no item e em "Lançar na minha conta". Dá para pagar pelo PIX ali mesmo, na hora ou no fim do evento.`;
 }
 function folhaConvite(cv){
   if(cv.tipo && cv.tipo!=="cliente") return folha(`<div class="olho">Convite · ${esc(TIPO_CONV[cv.tipo]||"")}</div>
@@ -4207,14 +4215,14 @@ function tentarConvite(){
     }
     else {
       const cv = snap.data();
-      S.posto = "Cliente · "+cv.nome; guardar("posto", S.posto);
+      S.posto = "Cliente · "+(cv.quem||cv.nome); guardar("posto", S.posto);
       guardar("cliSlug", cv.slug); guardar("cliNome", cv.nome); guardar("papel", "cliente");
       S.registrarDepois = false;
       try{
         await refAparelho().set({dev:S.dev, posto:S.posto, modelo:modeloAparelho(), visto:Date.now(), criado:(eu&&eu.criado)||Date.now(),
-          situacao:"ativo", cliente:true, convite:tok, cliSlug:cv.slug, cliNome:cv.nome, gerente:false, principal:false, local:""}, {merge:true});
+          situacao:"ativo", cliente:true, convite:tok, cliSlug:cv.slug, cliNome:cv.nome, cliQuem:cv.quem||"", gerente:false, principal:false, local:""}, {merge:true});
         S.db.collection("convites").doc(tok).set({usadoPor:S.dev, usadoEm:Date.now()}, {merge:true}).catch(()=>{}); tirarAntigo();
-        aviso("<b>Bem-vindo, "+esc(cv.nome)+"!</b>Toque no que pegar para lançar na sua conta", 6000);
+        aviso("<b>Bem-vindo, "+esc(cv.quem||cv.nome)+"!</b>"+(cv.quem? "Você lança na conta de "+esc(cv.nome) : "Toque no que pegar para lançar na sua conta"), 6000);
       }catch(e){ aviso("<b>Não consegui ativar o convite</b>Confira a internet e abra o link de novo", 6000); }
     }
     S.convite = null; guardar("convite", ""); S.aplicandoConvite = false; reavaliarEvento(); desenhar();
@@ -4223,7 +4231,7 @@ function tentarConvite(){
 function secAcessos(){
   if(!S.db) return `<div class="card"><h3>📲 Clientes e acessos</h3><p class="nota">Para os clientes lançarem pelo próprio celular, a sincronização precisa estar ligada (Ajustes → Dados e backup).</p></div>`;
   const conv = (S.convites||[]).filter(c=>!c.revogado).sort((a,b)=>a.nome.localeCompare(b.nome,"pt-BR"));
-  const apDe = (slugC, cvId)=> (S.aparelhos||[]).filter(a=>(cvId && a.convite===cvId) || (a.cliente && slugC && a.cliSlug===slugC));
+  const apDe = (slugC, cvId)=> (S.aparelhos||[]).filter(a=>(cvId && a.convite===cvId) || (a.cliente && !a.convite && slugC && a.cliSlug===slugC));
   const avs = (S.avisos||[]).filter(a=>!a.visto).sort((a,b)=>b.ts-a.ts);
   return `${avs.length? `<div class="card" style="border-color:var(--ambar);margin-top:0"><h3>💬 Avisos de pagamento<span class="sub-h">${avs.length}</span></h3>
       ${avs.map(a=>`<div class="item" style="gap:8px;align-items:center"><span class="cresce"><b>${esc(a.cliNome||a.cli)}</b> · R$ ${fmt(a.valor)}
@@ -4233,7 +4241,7 @@ function secAcessos(){
     <div class="card" ${avs.length?"":`style="margin-top:0"`}><h3>📲 Acessos pelo celular<span class="sub-h">${conv.length}</span></h3>
       <p class="nota">O cliente convidado lança o próprio consumo pelo celular durante o evento, acompanha a conta e paga pelo PIX. Vale para todos os eventos.</p>
       ${conv.map(c=>{ const aps = apDe(c.tipo&&c.tipo!=="cliente"? "" : c.slug, c.id), ativo = aps.find(a=>(a.situacao||"ativo")==="ativo");
-        return `<div class="item" style="gap:8px;align-items:center"><span class="cresce"><b>${esc(c.nome)}</b>${c.tipo&&c.tipo!=="cliente"? ` <span class="pill neutro">${esc(TIPO_CONV[c.tipo]||"")}</span>`:""}
+        return `<div class="item" style="gap:8px;align-items:center"><span class="cresce"><b>${esc(c.quem||c.nome)}</b>${c.quem? ` <span class="nota">· conta de ${esc(c.nome)}</span>`:""}${c.tipo&&c.tipo!=="cliente"? ` <span class="pill neutro">${esc(TIPO_CONV[c.tipo]||"")}</span>`:""}
           <span class="sub">${ativo? "conectado · "+esc(ativo.modelo||"")+" · visto "+haQuanto(ativo.visto) : aps.length? "aparelho bloqueado" : "convite enviado, ainda não abriu"}${c.fone? " · "+esc(foneBR(c.fone)):""}</span></span>
           <button class="bt bt-quieto bt-mini" data-acao="convite-enviar" data-id="${esc(c.id)}">Reenviar</button>
           <button class="bt bt-perigo bt-mini" data-acao="convite-tirar" data-id="${esc(c.id)}">Tirar acesso</button></div>`; }).join("") || `<p class="nota">Ninguém convidado ainda.</p>`}
@@ -4243,7 +4251,8 @@ function secAcessos(){
           <option value="comanda">Comanda fixa do bar (aparelho no balcão)</option>
           ${souPrincipal()? `<option value="gerente">Gerente (vende, cobra e convida)</option>`:""}
         </select>
-        <input class="campo" id="cv-nome" placeholder="Nome (cliente, gerente ou do aparelho)" list="cv-lista" autocomplete="off">
+        <input class="campo" id="cv-nome" placeholder="Nome de quem vai usar (cliente, gerente ou do aparelho)" list="cv-lista" autocomplete="off">
+        <input class="campo" id="cv-conta" placeholder="Lança na conta de… (só se for outra pessoa, ex.: família)" list="cv-lista" autocomplete="off">
         <datalist id="cv-lista">${S.pessoas.map(p=>`<option value="${esc(p.nome)}">`).join("")}</datalist>
         <input class="campo" id="cv-fone" inputmode="tel" placeholder="WhatsApp com DDD">
       </div>
@@ -6050,11 +6059,14 @@ document.addEventListener("click", async (e)=>{
         S.convites = (S.convites||[]).concat([cv]); const corpo = Object.assign({}, cv); delete corpo.id; gravarNuvem(S.db.collection("convites").doc(cv.id), corpo);
         folhaConvite(cv); desenhar(); return;
       }
-      const sl = slug(nome); const pe = S.pessoas.find(x=>x.slug===sl);
-      const fon = fone || (pe&&pe.fone) || "";
-      salvarPessoa({slug:sl, nome: pe? pe.nome : nome, fone:fon});
-      const exist = (S.convites||[]).find(c=>c.slug===sl && !c.revogado && (c.tipo||"cliente")==="cliente");
-      const cv = exist || {id:"cv"+novoId().replace(/[^A-Za-z0-9]/g,"")+Math.random().toString(36).slice(2,8), slug:sl, nome: pe? pe.nome : nome, fone:fon, criado:Date.now(), revogado:false};
+      const contaNome = (($("cv-conta")||{}).value||"").trim().replace(/\s+/g," ") || nome;
+      const sl = slug(contaNome); const pe = S.pessoas.find(x=>x.slug===sl);
+      const titular = slug(nome)===sl;
+      const fon = titular? (fone || (pe&&pe.fone) || "") : fone;
+      salvarPessoa({slug:sl, nome: pe? pe.nome : contaNome, fone: titular? fon : ((pe&&pe.fone)||"")});
+      const quem = titular? "" : nome;
+      const exist = (S.convites||[]).find(c=>c.slug===sl && !c.revogado && (c.tipo||"cliente")==="cliente" && slug(c.quem||"")===slug(quem));
+      const cv = exist || {id:"cv"+novoId().replace(/[^A-Za-z0-9]/g,"")+Math.random().toString(36).slice(2,8), slug:sl, nome: pe? pe.nome : contaNome, quem, fone:fon, criado:Date.now(), revogado:false};
       if(!exist){ S.convites = (S.convites||[]).concat([cv]); const corpo = Object.assign({}, cv); delete corpo.id; gravarNuvem(S.db.collection("convites").doc(cv.id), corpo); }
       folhaConvite(cv); desenhar(); return;
     }
