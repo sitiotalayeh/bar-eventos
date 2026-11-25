@@ -4103,6 +4103,25 @@ function telaComanda(){
     ${conta.saldo>0.004? `<div class="btns"><button class="bt bt-quieto" data-acao="cmd-pagar-saldo">Pagar o que deve (R$ ${fmt(conta.saldo)})</button></div>`:""}
     <div class="card"><h3>🧾 Últimos lançamentos<span class="sub-h">${conta.mov.length}</span></h3>${linhasMov(conta.mov.slice(0,8), true)}</div>`;
 }
+function blocoCompartilhar(cli){
+  if(!S.db || !cli.slug) return "";
+  const membros = (S.convites||[]).filter(c=>!c.revogado && c.slug===cli.slug && c.quem && (c.tipo||"cliente")==="cliente")
+    .sort((a,b)=>a.quem.localeCompare(b.quem,"pt-BR"));
+  const titular = !cli.quem;
+  const ligado = (c)=> (S.aparelhos||[]).some(a=>a.convite===c.id && (a.situacao||"ativo")==="ativo");
+  return `<div class="card"><h3>👥 Conta compartilhada<span class="sub-h">${membros.length}</span></h3>
+    ${titular? `<p class="nota">Você pode autorizar outras pessoas a lançar na sua conta, cada uma pelo próprio celular. Tudo cai na sua conta e aparece quem lançou.</p>`
+      : `<p class="nota">Você lança na conta de <b>${esc(cli.nome)}</b>. Só o titular autoriza ou tira pessoas.</p>`}
+    ${membros.length? `<div class="lista">${membros.map(c=>`<div class="item" style="gap:8px;align-items:center">
+      <span class="cresce"><b>${esc(c.quem)}</b><span class="sub">${ligado(c)? "usando" : "convite enviado, ainda não abriu"}</span></span>
+      ${titular? `<button class="bt bt-quieto bt-mini" data-acao="convite-enviar" data-id="${esc(c.id)}">Reenviar</button>
+        <button class="bt bt-perigo bt-mini" data-acao="cli-tira" data-id="${esc(c.id)}">Tirar</button>`:""}</div>`).join("")}</div>` : ""}
+    ${titular? `<div class="campos" style="margin-top:10px">
+        <input class="campo" id="cc-nome" placeholder="Nome de quem você autoriza" autocomplete="off">
+        <input class="campo" id="cc-fone" inputmode="tel" placeholder="WhatsApp com DDD (opcional)"></div>
+      <div class="btns"><button class="bt bt-quieto" data-acao="cli-autoriza">Autorizar e mandar convite</button></div>`:""}
+  </div>`;
+}
 function telaCliente(){
   const cli = meuCliente();
   if(!S.evento) return `<div class="card"><h3>Olá${cli.nome? ", "+esc(cli.nome):""}!</h3>
@@ -4138,6 +4157,7 @@ function telaCliente(){
         ${q? `<span class="conta-qtd">${q}</span>`:""}<span class="cat">${esc(p.c)}</span><b>${esc(p.n)}</b><span>R$ ${fmt(p.p)}</span></button>`; }).join("")}</div>
     <div class="card"><h3>🧾 Meus lançamentos<span class="sub-h">${conta.mov.length}</span></h3>${linhasMov(conta.mov, true)}</div>
     ${blocoPixCliente(conta.saldo, S.evId)}
+    ${blocoCompartilhar(cli)}
     ${anteriores.length? `<div class="card"><h3>📅 Eventos anteriores</h3><div class="lista">${anteriores.map(e=>`
       <button class="conta" data-acao="cli-mes" data-ev="${esc(e.id)}"><span class="corpo"><span class="nome">${esc(e.nome)}</span>
         <span class="sub">toque para ver o consumo</span></span><span class="saldo quite" style="font-size:18px;background:var(--latao-luz);color:var(--latao-sv)">›</span></button>`).join("")}</div></div>`:""}
@@ -4175,8 +4195,8 @@ function folhaConvite(cv){
       <button class="bt bt-quieto" data-copiar="${esc(linkConvite(cv))}" data-rotulo="Link copiado">Copiar link</button></div>
     <p class="nota" style="margin-top:8px">O link vale para um aparelho. Para tirar o acesso depois, use Tirar acesso na lista.</p>`);
   folha(`<div class="olho">Convite do bar</div>
-    <h2 style="font-family:var(--disp);font-size:22px;text-transform:uppercase;margin:4px 0 8px">${esc(cv.nome)}</h2>
-    <p class="nota">Envie pelo WhatsApp. Quem abrir o link entra como <b>${esc(cv.nome)}</b> e só lança na conta dele.</p>
+    <h2 style="font-family:var(--disp);font-size:22px;text-transform:uppercase;margin:4px 0 8px">${esc(cv.quem||cv.nome)}</h2>
+    <p class="nota">Envie pelo WhatsApp. Quem abrir o link entra como <b>${esc(cv.quem||cv.nome)}</b> e lança só na conta de <b>${esc(cv.nome)}</b>.</p>
     <div class="btns"><button class="bt bt-ok" data-acao="convite-zap" data-id="${esc(cv.id)}">Enviar no WhatsApp${cv.fone? " para "+esc(foneBR(cv.fone)):""}</button>
       <button class="bt bt-quieto" data-copiar="${esc(linkConvite(cv))}" data-rotulo="Link do convite copiado">Copiar link</button></div>
     <p class="nota" style="margin-top:8px">Não mande o link para outra pessoa: ele dá acesso à conta de ${esc(cv.nome)}.</p>`);
@@ -5947,8 +5967,8 @@ document.addEventListener("click", async (e)=>{
       const cv = (S.convites||[]).find(c=>c.id===valor); if(!cv) return;
       const corpo = Object.assign({}, cv, {revogado:true, revogadoEm:Date.now()}); delete corpo.id;
       gravarNuvem(S.db.collection("convites").doc(cv.id), corpo);
-      (S.aparelhos||[]).filter(x=>x.convite===cv.id || (x.cliente && cv.slug && x.cliSlug===cv.slug)).filter(x=>!x.principal).forEach(x=>refAparelho(x.id).set({situacao:"bloqueado"}, {merge:true}).catch(()=>{}));
-      fechaFolha(); aviso("<b>Acesso retirado</b>"+esc(cv.nome)); desenhar(); return;
+      (S.aparelhos||[]).filter(x=>x.convite===cv.id || (x.cliente && !x.convite && !cv.quem && cv.slug && x.cliSlug===cv.slug)).filter(x=>!x.principal).forEach(x=>refAparelho(x.id).set({situacao:"bloqueado"}, {merge:true}).catch(()=>{}));
+      fechaFolha(); aviso("<b>Acesso retirado</b>"+esc(cv.quem||cv.nome)); desenhar(); return;
     }
     if(tipo==="cancelar"){ lancar({tipo:"cancelamento", alvo:valor, total:0}); aviso("<b>Lançamento cancelado</b>"); }
     if(tipo==="tira"){ const ev = JSON.parse(JSON.stringify(S.evento));
@@ -6048,6 +6068,22 @@ document.addEventListener("click", async (e)=>{
       if(!S.db){ aviso("<b>Sem conexão</b>"); return; }
       gravarNuvem(S.db.collection("avisos").doc("av"+novoId()), {cli:cli.slug, cliNome:cli.nome, ev:evId, evNome:ev.nome||"", valor:v, ts:Date.now(), dev:S.dev, visto:false});
       fechaFolha(); if(papel()==="comanda"){ S.cmdCli = null; S.carrinho = {}; } desenhar(); aviso("<b>Aviso enviado</b>Obrigado!", 3500); return;
+    }
+    if(a==="cli-autoriza"){
+      const cli = meuCliente(); if(!S.db || !cli.slug || cli.quem) return;
+      const quem = ($("cc-nome").value||"").trim().replace(/\s+/g," "), fone = ($("cc-fone").value||"").replace(/\D/g,"");
+      if(!quem){ aviso("<b>Digite o nome</b>da pessoa que você autoriza"); return; }
+      if(slug(quem)===cli.slug){ aviso("<b>Esse é você</b>Digite o nome de outra pessoa"); return; }
+      const exist = (S.convites||[]).find(c=>c.slug===cli.slug && !c.revogado && slug(c.quem||"")===slug(quem));
+      const cv = exist || {id:"cv"+novoId().replace(/[^A-Za-z0-9]/g,"")+Math.random().toString(36).slice(2,8), slug:cli.slug, nome:cli.nome, quem, fone,
+        criado:Date.now(), revogado:false, autorizadoPor:S.dev};
+      if(!exist){ S.convites = (S.convites||[]).concat([cv]); const corpo = Object.assign({}, cv); delete corpo.id; gravarNuvem(S.db.collection("convites").doc(cv.id), corpo); }
+      folhaConvite(cv); desenhar(); return;
+    }
+    if(a==="cli-tira"){
+      const cli = meuCliente(); const cv = (S.convites||[]).find(c=>c.id===el.dataset.id);
+      if(!cv || cli.quem || cv.slug!==cli.slug) return;
+      confirmar("Tirar da conta", `<b>${esc(cv.quem)}</b> deixa de lançar na sua conta. O que já foi lançado continua.`, "Tirar", "convtira:"+cv.id, true); return;
     }
     if(a==="convite-criar"){
       const nome = ($("cv-nome").value||"").trim().replace(/\s+/g," "), fone = ($("cv-fone").value||"").replace(/\D/g,"");
