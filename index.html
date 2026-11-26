@@ -3446,11 +3446,12 @@ function recalcular(){
   const produtos = (S.evento&&S.evento.produtos)||[];
   const porNome = new Map(); produtos.forEach(p=>porNome.set(slug(p.n), p.id));
   const chave = (i)=> (i.id && produtos.some(p=>p.id===i.id)) ? i.id : (porNome.get(slug(i.n)) || null);
-  const entrou = new Map(), vendeu = new Map(), gastoCompra = new Map();
+  const entrou = new Map(), vendeu = new Map(), gastoCompra = new Map(), mexeu = new Set(), ajustes = new Map();
   let nVendas = 0, totalRec = 0, receitaComCusto = 0, custoVendido = 0, receitaItens = 0;
   validos.forEach(e=>{
     if(e.tipo==="entrada"){
-      entrou.set(e.prod, (entrou.get(e.prod)||0) + (e.q||0));
+      entrou.set(e.prod, (entrou.get(e.prod)||0) + (e.q||0)); mexeu.add(e.prod);
+      if(e.forma==="ajuste") ajustes.set(e.prod, (ajustes.get(e.prod)||0) + (e.q||0));
       gastoCompra.set(e.prod, (gastoCompra.get(e.prod)||0) + (e.total||0));
       return;
     }
@@ -3480,10 +3481,11 @@ function recalcular(){
   C.estoque = produtos.map(p=>{
     const ent = entrou.get(p.id)||0, sai = vendeu.get(p.id)||0;
     const saldo = ent - sai;
-    const controla = (p.min>0) || ent>0;
+    const controla = (p.min>0) || ent>0 || mexeu.has(p.id);
     let estado = "solto";
     if(controla) estado = saldo<=0 ? "acabou" : (p.min>0 && saldo<=p.min ? "atencao" : "ok");
-    return {p, ent, sai, saldo, controla, estado, gasto:gastoCompra.get(p.id)||0};
+    const aj = ajustes.get(p.id)||0;
+    return {p, ent, sai, saldo, controla, estado, aj, gasto:gastoCompra.get(p.id)||0};
   });
   C.alertas = C.estoque.filter(x=>x.controla && (x.estado==="acabou"||x.estado==="atencao"))
     .sort((a,b)=>a.saldo-b.saldo);
@@ -4315,7 +4317,7 @@ function telaPosto(){
 }
 function produtosAtivos(){
   const ps = ((S.evento&&S.evento.produtos)||[]).filter(p=>p.ativo!==false);
-  return ps;
+  return ps.slice().sort((a,b)=>String(a.n||"").localeCompare(String(b.n||""), "pt-BR", {numeric:true, sensitivity:"base"}));
 }
 function montarComanda(itens, total, n){
   if(!n) return `<div class="faixa" style="margin-bottom:10px">
@@ -4407,7 +4409,7 @@ function telaEstoque(){
   const cartao = (x)=>`<button class="est ${x.estado}" data-estoque="${esc(x.p.id)}">
     <span class="corpo"><span class="nome">${esc(x.p.n)}</span>
       <span class="sub">${x.controla
-        ? `entrou ${x.ent} · vendeu ${x.sai}${x.p.min>0? " · avisar em "+x.p.min:""}${x.p.custo>0? " · custo "+fmt(x.p.custo):""}`
+        ? `entrou ${x.ent-(x.aj||0)} · vendeu ${x.sai}${x.aj? " · ajuste "+(x.aj>0?"+":"")+x.aj:""}${x.p.min>0? " · avisar em "+x.p.min:""}${x.p.custo>0? " · custo "+fmt(x.p.custo):""}`
         : `sem controle${x.p.custo>0? " · custo "+fmt(x.p.custo):""} · vendeu ${x.sai}`}</span></span>
     <span class="saldo"><b>${x.controla? x.saldo : "–"}</b><span>${x.controla? "em estoque" : "lançar"}</span></span></button>`;
   const margem = r.receitaComCusto>0 ? (r.lucro/r.receitaComCusto*100) : 0;
@@ -4433,7 +4435,7 @@ function folhaEstoque(id){
     <h2 style="font-family:var(--disp);font-size:22px;text-transform:uppercase;margin:4px 0 10px">${esc(p.n)}</h2>
     ${x.controla? `<div class="placa larga"><em>em estoque agora</em>
       <strong style="color:${x.estado==="acabou"?"var(--vermelho)":x.estado==="atencao"?"var(--latao-sv)":"var(--verde)"}">${x.saldo}</strong>
-      <span>entrou ${x.ent} · vendeu ${x.sai} · compra de ${fmt(x.gasto)}</span></div>`:""}
+      <span>entrou ${x.ent-(x.aj||0)} · vendeu ${x.sai}${x.aj? " · ajuste "+(x.aj>0?"+":"")+x.aj:""} · compra de ${fmt(x.gasto)}</span></div>`:""}
     <div class="card" style="margin-top:14px"><h3>Lançar entrada</h3>
       <div class="linha-campos">
         <div><label class="rot" for="en-qtd">Quantidade que entrou</label>
@@ -4443,6 +4445,12 @@ function folhaEstoque(id){
       </div>
       <div class="btns"><button class="bt bt-ouro" data-entrada="${esc(p.id)}">Lançar entrada</button></div>
       <p class="nota">A entrada guarda o custo de compra. Esse custo passa a valer para o lucro deste item.</p>
+    </div>
+    <div class="card"><h3>Corrigir pela contagem</h3>
+      <label class="rot" for="en-cont">Quantidade que tem agora${x.controla? ` (o sistema diz ${x.saldo})`:""}</label>
+      <input class="campo" id="en-cont" inputmode="numeric" placeholder="Ex.: 0">
+      <div class="btns"><button class="bt bt-quieto" data-contagem="${esc(p.id)}">Corrigir estoque</button></div>
+      <p class="nota">Use quando contar e o número não bater, ou para zerar o item. Fica registrado como ajuste, sem custo.</p>
     </div>
     <div class="card"><h3>Avisar quando chegar em</h3>
       <div class="linha-campos">
@@ -4454,9 +4462,9 @@ function folhaEstoque(id){
       <div class="btns"><button class="bt bt-quieto" data-min="${esc(p.id)}">Salvar aviso e custo</button></div>
       <p class="nota">Chegando nessa quantidade, o item fica amarelo na tela de vendas e no estoque. Zerou, fica vermelho.</p>
     </div>
-    ${x.ent>0? `<div class="card"><h3>Entradas lançadas</h3>
+    ${C.validos.some(e=>e.tipo==="entrada"&&e.prod===p.id)? `<div class="card"><h3>Entradas e ajustes</h3>
       ${C.validos.filter(e=>e.tipo==="entrada"&&e.prod===p.id).sort((a,b)=>b.ts-a.ts).map(e=>
-        `<div class="item"><span class="cresce">${e.q} un · ${fmt(e.total/e.q)} cada
+        `<div class="item"><span class="cresce">${e.forma==="ajuste"? "Ajuste de contagem: "+(e.q>0?"+":"")+e.q+" un" : e.q+" un"+(e.q? " · "+fmt(e.total/e.q)+" cada" : "")}
           <span class="sub">${dataHora(e.ts)} · ${esc(e.posto||"—")}</span></span>
           <span class="val">${fmt(e.total)}</span></div>`).join("")}</div>`:""}`);
 }
@@ -4551,7 +4559,7 @@ function telaCaixa(){
       ${mov.length? mov.map(e=>{
         const canc = C.cancelados.has(e.id);
         const rotulo = e.tipo==="pagamento" ? "Pagamento · "+esc(e.cliNome||e.cli)
-          : e.tipo==="entrada" ? "Entrada de estoque · "+esc(e.nome||"")
+          : e.tipo==="entrada" ? (e.forma==="ajuste"? "Ajuste de estoque · " : "Entrada de estoque · ")+esc(e.nome||"")
           : esc((e.itens||[]).map(i=>i.q+"× "+i.n).join(", ")||"venda");
         return `<div class="item" style="${canc?"opacity:.45;text-decoration:line-through":""}">
           <span class="cresce">${rotulo}
@@ -5560,7 +5568,7 @@ async function pdfRelatorio(tipo){
     const mov = C.todos.filter(e=>e.tipo!=="cancelamento").sort((a,b)=>a.ts-b.ts);
     mov.forEach(e=>{ quebra();
       const desc = e.tipo==="pagamento" ? "Pagamento · "+(e.cliNome||e.cli||"")
-        : e.tipo==="entrada" ? "Entrada de estoque · "+(e.nome||"")
+        : e.tipo==="entrada" ? (e.forma==="ajuste"? "Ajuste de estoque · " : "Entrada de estoque · ")+(e.nome||"")
         : ((e.itens||[]).map(i=>i.q+"x "+i.n).join(", ")||"venda")
           + (e.cli? " · "+(e.cliNome||e.cli) : "");
       const canc = C.cancelados.has(e.id);
@@ -5888,17 +5896,25 @@ document.addEventListener("click", async (e)=>{
   if((el = alvo("data-estoque"))){ folhaEstoque(el.dataset.estoque); return; }
   if((el = alvo("data-entrada"))){
     const id = el.dataset.entrada;
-    const q = parseInt(String($("en-qtd").value||"").replace(/\D/g,""),10);
+    const q = parseInt(String($("en-qtd").value||"").replace(/\D/g,""),10);   /* zero vale: só registra o custo e liga o controle */
     const custoTxt = String($("en-custo").value||"").replace(",",".");
     const p = (S.evento.produtos||[]).find(x=>x.id===id);
     const custo = custoTxt.trim()==="" ? (p.custo||0) : parseFloat(custoTxt);
-    if(!(q>0)){ aviso("<b>Falta a quantidade</b>Quantas unidades entraram?"); return; }
+    if(!(q>=0)){ aviso("<b>Falta a quantidade</b>Quantas unidades entraram? (pode ser 0)"); return; }
     if(!(custo>=0)){ aviso("<b>Custo inválido</b>"); return; }
     if(custo>0 && custo!==p.custo) mexerProduto(id, (x)=>{ x.custo = custo; });
     lancar({tipo:"entrada", prod:id, nome:p.n, q, total:q*custo, forma:"compra", itens:[]});
     fechaFolha(); desenhar();
     aviso(`<b>Entrada lançada</b>${q} × ${esc(p.n)} · ${fmt(q*custo)}`);
     return;
+  }
+  if((el = alvo("data-contagem"))){
+    const id = el.dataset.contagem, x = C.mapaEstoque.get(id); if(!x) return;
+    const txt = String($("en-cont").value||"").replace(/\D/g,"");
+    if(txt===""){ aviso("<b>Digite a quantidade</b>que tem agora (pode ser 0)"); return; }
+    const novo = parseInt(txt,10), dif = novo - (x.controla? x.saldo : x.ent - x.sai);
+    lancar({tipo:"entrada", prod:id, nome:x.p.n, q:dif, total:0, forma:"ajuste", itens:[]});
+    fechaFolha(); desenhar(); aviso(`<b>Estoque corrigido</b>${esc(x.p.n)}: agora ${novo}`); return;
   }
   if((el = alvo("data-min"))){
     const id = el.dataset.min;
