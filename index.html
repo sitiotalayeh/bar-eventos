@@ -4002,6 +4002,28 @@ function contaEm(itensEv, slugC){
   return {mov, deve, pagou, saldo:deve-pagou};
 }
 /* conta da família: mostra quem lançou, quando não foi o titular */
+/* quem da conta compartilhada lançou ("" = o titular, o balcão ou a comanda) */
+function pessoaDe(e){
+  if(e.tipo!=="venda") return "";
+  const q = e.quem || ((e.auto && !e.comanda)? String(e.posto||"").replace(/^Cliente · /,"") : "");
+  return (q && slug(q)!==slug(e.cliNome||"")) ? q : "";
+}
+function contaDaPessoa(conta, quem){
+  const mov = conta.mov.filter(e=>e.tipo==="venda" && slug(pessoaDe(e))===slug(quem));
+  return {mov, deve: mov.filter(e=>e.forma==="fiado").reduce((s,e)=>s+e.total,0)};
+}
+function blocoPorPessoa(conta, cli){
+  const g = new Map();
+  conta.mov.filter(e=>e.tipo==="venda" && e.forma==="fiado").forEach(e=>{ const k = pessoaDe(e) || ""; const x = g.get(slug(k)) || {nome:k, t:0, n:0}; x.t += e.total; x.n++; g.set(slug(k), x); });
+  const membros = (S.convites||[]).filter(c=>!c.revogado && c.slug===cli.slug && c.quem);
+  if(!membros.length && [...g.keys()].every(k=>!k)) return "";
+  membros.forEach(c=>{ if(!g.has(slug(c.quem))) g.set(slug(c.quem), {nome:c.quem, t:0, n:0}); });
+  const linhas = [...g.values()].sort((a,b)=>(a.nome?1:0)-(b.nome?1:0) || b.t-a.t);
+  return `<div class="card"><h3>👥 Consumo por pessoa</h3>
+    <div class="lista">${linhas.map(x=>`<div class="item"><span class="cresce"><b>${x.nome? esc(x.nome) : "Você"}</b><span class="sub">${x.n} lançamento(s)</span></span>
+      <span class="val">R$ ${fmt(x.t)}</span></div>`).join("")}</div>
+    <p class="nota">O total da conta é a soma de todos. Quem você autorizou vê só o que ele mesmo lançou.</p></div>`;
+}
 function quemLancou(e){
   const q = String(e.posto||"").replace(/^Cliente · /,"");
   if(!e.auto || e.comanda || !q) return "";
@@ -4060,6 +4082,15 @@ function clientesDaComanda(){
   (S.clientes||[]).forEach(c=>{ if(c.slug) m.set(c.slug, c.nome||m.get(c.slug)||c.slug); });
   return [...m.entries()].map(([slug,nome])=>({slug,nome})).sort((a,b)=>a.nome.localeCompare(b.nome,"pt-BR"));
 }
+function hashSenhaCmd(v){ return LIC.conta("senhacmd|"+(LICENCA.conta||"")+"|"+String(v||"").trim()); }
+function cardSenhaCmd(){
+  const tem = !!(S.cfg&&S.cfg.senhaCmd);
+  return `<div class="card"><h3>🔒 Senha da comanda fixa</h3>
+    <p class="nota">Na comanda fixa ninguém vê quanto cada cliente deve. Para ver a conta de alguém e fazer o acerto ali, é preciso esta senha. ${tem? "<b>Senha cadastrada.</b>" : "<b>Ainda sem senha</b> — ninguém consegue ver valores na comanda."}</p>
+    <input class="campo" id="sc-senha" type="password" inputmode="numeric" autocomplete="new-password" placeholder="${tem? "Nova senha" : "Criar senha (mín. 4)"}">
+    <div class="btns"><button class="bt bt-quieto" data-acao="senha-cmd-salvar">${tem? "Trocar senha" : "Salvar senha"}</button>
+      ${tem? `<button class="bt bt-quieto" data-acao="senha-cmd-tirar">Remover senha</button>`:""}</div></div>`;
+}
 function telaComanda(){
   if(!S.evento) return `<div class="card"><div class="vazio">${S.db && !S.cfgPronto? "Conectando…" : "Nenhum evento aberto agora.<br>Avise o responsável."}</div></div>`;
   const todos = C.validos.concat(C.todos.filter(e=>e.tipo==="cancelamento"));
@@ -4072,7 +4103,7 @@ function telaComanda(){
       <div class="lista">${cs.map(c=>{ const s = contaEm(todos, c.slug).saldo;
         return `<button class="conta" data-acao="cmd-cli" data-slug="${esc(c.slug)}" data-nome="${esc(c.nome)}" data-cmd-nome="${esc(c.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,""))}">
           <span class="corpo"><span class="nome" style="font-size:17px">${esc(c.nome)}</span></span>
-          <span class="saldo ${s>0.004?"":"quite"}" style="font-size:13px">${s>0.004? "R$ "+fmt(s) : "›"}</span></button>`; }).join("")
+          <span class="saldo quite" style="font-size:15px">›</span></button>`; }).join("")
         || `<p class="nota">Nenhum cliente cadastrado ainda.</p>`}</div>
       <div class="card"><h3>➕ Não achou o nome?</h3>
         <input class="campo" id="cmd-novo" placeholder="Nome completo" autocomplete="off">
@@ -4086,7 +4117,7 @@ function telaComanda(){
   const lista = ps.filter(p=>S.cat==="Todos" || p.c===S.cat);
   return `<div class="card" style="margin-top:0;display:flex;align-items:center;gap:10px">
       <span class="cresce"><span class="olho">conta de</span><b style="display:block;font-size:20px">${esc(cli.nome)}</b>
-        <span class="nota">No evento: R$ ${fmt(conta.deve)} · pago R$ ${fmt(conta.pagou)} · <b>a pagar R$ ${fmt(Math.max(0,conta.saldo))}</b></span></span>
+        ${S.cmdLiberado===cli.slug? `<span class="nota">Consumo: R$ ${fmt(conta.deve)} · pago R$ ${fmt(conta.pagou)} · <b>a pagar R$ ${fmt(Math.max(0,conta.saldo))}</b></span>` : ""}</span>
       <button class="bt bt-quieto bt-mini" data-acao="cmd-sair">Trocar</button></div>
     ${itens.length? `<div class="comanda">
       <div class="comanda-topo"><span>🧾 Para lançar</span><button class="bt bt-quieto bt-mini" data-acao="limpar">Limpar</button></div>
@@ -4102,8 +4133,15 @@ function telaComanda(){
     <div class="grade">${lista.map(p=>{ const q = S.carrinho[p.id]||0;
       return `<button class="prod ${q?"na-comanda":""}" data-add="${esc(p.id)}" style="${estiloCat(p.c)}">
         ${q? `<span class="conta-qtd">${q}</span>`:""}<span class="cat">${esc(p.c)}</span><b>${esc(p.n)}</b><span>R$ ${fmt(p.p)}</span></button>`; }).join("")}</div>
-    ${conta.saldo>0.004? `<div class="btns"><button class="bt bt-quieto" data-acao="cmd-pagar-saldo">Pagar o que deve (R$ ${fmt(conta.saldo)})</button></div>`:""}
-    <div class="card"><h3>🧾 Últimos lançamentos<span class="sub-h">${conta.mov.length}</span></h3>${linhasMov(conta.mov.slice(0,8), true)}</div>`;
+    ${(()=>{ const agora = conta.mov.filter(e=>e.dev===S.dev && e.tipo!=="pagamento" && Date.now()-(e.ts||0) < DESFAZER_MIN*60000);
+      return agora.length? `<div class="card"><h3>🧾 Lançado agora neste aparelho</h3>${linhasMov(agora, true)}</div>` : ""; })()}
+    ${S.cmdLiberado===cli.slug
+      ? `<div class="card"><h3>🔓 Conta de ${esc(cli.nome)}</h3>
+          ${conta.saldo>0.004? `<div class="btns"><button class="bt bt-ok" data-acao="cmd-pagar-saldo">Pagar no PIX (R$ ${fmt(conta.saldo)})</button>
+            <button class="bt bt-quieto" data-acao="cmd-receber">Receber em dinheiro ou cartão</button></div>` : `<p class="nota">Nada a pagar.</p>`}
+          ${linhasMov(conta.mov.slice(0,12), true)}
+          <div class="btns"><button class="bt bt-quieto" data-acao="cmd-trancar">🔒 Esconder a conta</button></div></div>`
+      : `<div class="btns"><button class="bt bt-quieto" data-acao="cmd-senha">🔒 Ver conta ou pagar (pede senha)</button></div>`}`;
 }
 function blocoCompartilhar(cli){
   if(!S.db || !cli.slug) return "";
@@ -4111,10 +4149,10 @@ function blocoCompartilhar(cli){
     .sort((a,b)=>a.quem.localeCompare(b.quem,"pt-BR"));
   const titular = !cli.quem;
   const ligado = (c)=> (S.aparelhos||[]).some(a=>a.convite===c.id && (a.situacao||"ativo")==="ativo");
-  return `<div class="card"><h3>👥 Conta compartilhada<span class="sub-h">${membros.length}</span></h3>
+  return `<div class="card"><h3>👥 Conta compartilhada${titular? `<span class="sub-h">${membros.length}</span>`:""}</h3>
     ${titular? `<p class="nota">Você pode autorizar outras pessoas a lançar na sua conta, cada uma pelo próprio celular. Tudo cai na sua conta e aparece quem lançou.</p>`
       : `<p class="nota">Você lança na conta de <b>${esc(cli.nome)}</b>. Só o titular autoriza ou tira pessoas.</p>`}
-    ${membros.length? `<div class="lista">${membros.map(c=>`<div class="item" style="gap:8px;align-items:center">
+    ${titular && membros.length? `<div class="lista">${membros.map(c=>`<div class="item" style="gap:8px;align-items:center">
       <span class="cresce"><b>${esc(c.quem)}</b><span class="sub">${ligado(c)? "usando" : "convite enviado, ainda não abriu"}</span></span>
       ${titular? `<button class="bt bt-quieto bt-mini" data-acao="convite-enviar" data-id="${esc(c.id)}">Reenviar</button>
         <button class="bt bt-perigo bt-mini" data-acao="cli-tira" data-id="${esc(c.id)}">Tirar</button>`:""}</div>`).join("")}</div>` : ""}
@@ -4128,7 +4166,9 @@ function telaCliente(){
   const cli = meuCliente();
   if(!S.evento) return `<div class="card"><h3>Olá${cli.nome? ", "+esc(cli.nome):""}!</h3>
     <p class="nota">${S.db && !S.cfgPronto? "Conectando…" : "Nenhum evento aberto agora. Quando o bar abrir, os produtos aparecem aqui."}</p></div>`;
-  const conta = contaEm(C.validos.concat(C.todos.filter(e=>e.tipo==="cancelamento")), cli.slug);
+  const contaToda = contaEm(C.validos.concat(C.todos.filter(e=>e.tipo==="cancelamento")), cli.slug);
+  const minha = cli.quem? contaDaPessoa(contaToda, cli.quem) : null;
+  const conta = minha? {mov:minha.mov, deve:minha.deve, pagou:0, saldo:minha.deve} : contaToda;
   const itens = Object.entries(S.carrinho);
   const total = itens.reduce((s,[id,q])=>s+(prod(id).p*q),0);
   const ps = produtosAtivos();
@@ -4138,11 +4178,13 @@ function telaCliente(){
   return `<div class="card" style="margin-top:0">
       <div class="olho">${esc(S.evento.nome)}</div>
       <h3 style="margin:2px 0 10px">Olá, ${esc(cli.quem||cli.nome||"cliente")}!${cli.quem? `<span class="nota" style="display:block;font-weight:500;font-size:13px">Conta de ${esc(cli.nome)}, compartilhada</span>`:""}</h3>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center">
+      ${minha? `<div style="text-align:center"><div class="olho">seu consumo</div><b style="font-size:24px">R$ ${fmt(minha.deve)}</b>
+        <p class="nota" style="margin:6px 0 0">Você vê só o que lançou. O total e os pagamentos da conta ficam com ${esc(cli.nome)}.</p></div>` :
+      `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center">
         <div><div class="olho">consumo</div><b style="font-size:18px">R$ ${fmt(conta.deve)}</b></div>
         <div><div class="olho">pago</div><b style="font-size:18px;color:var(--verde)">R$ ${fmt(conta.pagou)}</b></div>
         <div><div class="olho">a pagar</div><b style="font-size:18px;color:${conta.saldo>0.004?"var(--vermelho,#9a2a1a)":"var(--verde)"}">R$ ${fmt(Math.max(0,conta.saldo))}</b></div>
-      </div></div>
+      </div>`}</div>
     ${itens.length? `<div class="comanda">
       <div class="comanda-topo"><span>🧾 Para lançar na sua conta</span><button class="bt bt-quieto bt-mini" data-acao="limpar">Limpar</button></div>
       <div class="comanda-itens">${itens.map(([id,q])=>`<div class="carrinho-item">
@@ -4158,7 +4200,11 @@ function telaCliente(){
       return `<button class="prod ${q?"na-comanda":""}" data-add="${esc(p.id)}" style="${estiloCat(p.c)}">
         ${q? `<span class="conta-qtd">${q}</span>`:""}<span class="cat">${esc(p.c)}</span><b>${esc(p.n)}</b><span>R$ ${fmt(p.p)}</span></button>`; }).join("")}</div>
     <div class="card"><h3>🧾 Meus lançamentos<span class="sub-h">${conta.mov.length}</span></h3>${linhasMov(conta.mov, true)}</div>
-    ${blocoPixCliente(conta.saldo, S.evId)}
+    ${minha? (minha.deve>0.004? `<div class="card"><h3>📲 Pagar o que você consumiu</h3>
+        <p class="nota">Paga pelo PIX e toca em Já paguei: o responsável confere e dá baixa na conta de ${esc(cli.nome)}.</p>
+        <div class="btns"><button class="bt bt-ok" data-acao="pag-parte" data-ev="${esc(S.evId)}" data-v="${minha.deve}">Pagar R$ ${fmt(minha.deve)} no PIX</button></div></div>` : "")
+      : blocoPixCliente(conta.saldo, S.evId)}
+    ${minha? "" : blocoPorPessoa(contaToda, cli)}
     ${blocoCompartilhar(cli)}
     ${anteriores.length? `<div class="card"><h3>📅 Eventos anteriores</h3><div class="lista">${anteriores.map(e=>`
       <button class="conta" data-acao="cli-mes" data-ev="${esc(e.id)}"><span class="corpo"><span class="nome">${esc(e.nome)}</span>
@@ -4171,7 +4217,13 @@ async function folhaMesCliente(evId){
   try{
     const snap = await S.db.collection("lanc").where("ev","==",evId).get();
     const todos = []; snap.docs.forEach(d=>(d.data().itens||[]).forEach(x=>todos.push(x)));
-    const conta = contaEm(todos, meuCliente().slug);
+    const eu_ = meuCliente(), toda = contaEm(todos, eu_.slug);
+    if(eu_.quem){ const m = contaDaPessoa(toda, eu_.quem);
+      folha(`<div class="olho">${esc(ev.nome)}</div>
+        <h2 style="font-family:var(--disp);font-size:24px;text-transform:uppercase;margin:4px 0 8px">Seu consumo R$ ${fmt(m.deve)}</h2>
+        <p class="nota">Conta de ${esc(eu_.nome)} · você vê só o que lançou.</p>
+        <div style="margin-top:10px">${linhasMov(m.mov, false)}</div>`); return; }
+    const conta = toda;
     folha(`<div class="olho">${esc(ev.nome)}</div>
       <h2 style="font-family:var(--disp);font-size:24px;text-transform:uppercase;margin:4px 0 8px">${conta.saldo>0.004? "Falta pagar R$ "+fmt(conta.saldo) : "Conta paga ✓"}</h2>
       <p class="nota">Consumo R$ ${fmt(conta.deve)} · pago R$ ${fmt(conta.pagou)}</p>
@@ -4207,7 +4259,7 @@ function cardAvisos(){
   const av = (S.avisos||[]).filter(a=>!a.visto && a.ev===S.evId).sort((a,b)=>b.ts-a.ts);
   if(!admin() || !av.length) return "";
   return `<div class="card" style="border-color:var(--ambar)"><h3>💬 Avisos de pagamento<span class="sub-h">${av.length}</span></h3>
-    ${av.map(a=>`<div class="item" style="gap:8px;align-items:center"><span class="cresce"><b>${esc(a.cliNome||a.cli)}</b> avisou que pagou
+    ${av.map(a=>`<div class="item" style="gap:8px;align-items:center"><span class="cresce"><b>${esc(a.quem? a.quem+" (conta de "+(a.cliNome||a.cli)+")" : (a.cliNome||a.cli))}</b> avisou que pagou
       <b>R$ ${fmt(a.valor)}</b><span class="sub">${esc(dataHora(a.ts))}</span></span>
       <button class="bt bt-ok bt-mini" data-acao="aviso-baixa" data-id="${esc(a.id)}">Dar baixa</button>
       <button class="bt bt-quieto bt-mini" data-acao="aviso-dispensa" data-id="${esc(a.id)}">✕</button></div>`).join("")}
@@ -4256,7 +4308,7 @@ function secAcessos(){
   const apDe = (slugC, cvId)=> (S.aparelhos||[]).filter(a=>(cvId && a.convite===cvId) || (a.cliente && !a.convite && slugC && a.cliSlug===slugC));
   const avs = (S.avisos||[]).filter(a=>!a.visto).sort((a,b)=>b.ts-a.ts);
   return `${avs.length? `<div class="card" style="border-color:var(--ambar);margin-top:0"><h3>💬 Avisos de pagamento<span class="sub-h">${avs.length}</span></h3>
-      ${avs.map(a=>`<div class="item" style="gap:8px;align-items:center"><span class="cresce"><b>${esc(a.cliNome||a.cli)}</b> · R$ ${fmt(a.valor)}
+      ${avs.map(a=>`<div class="item" style="gap:8px;align-items:center"><span class="cresce"><b>${esc(a.quem? a.quem+" (conta de "+(a.cliNome||a.cli)+")" : (a.cliNome||a.cli))}</b> · R$ ${fmt(a.valor)}
         <span class="sub">${esc(a.evNome||"")} · ${esc(dataHora(a.ts))}</span></span>
         <button class="bt bt-ok bt-mini" data-acao="aviso-baixa" data-id="${esc(a.id)}">Dar baixa</button>
         <button class="bt bt-quieto bt-mini" data-acao="aviso-dispensa" data-id="${esc(a.id)}">✕</button></div>`).join("")}</div>`:""}
@@ -4405,7 +4457,10 @@ function telaEstoque(){
   const controlados = C.estoque.filter(x=>x.controla);
   const soltos = C.estoque.filter(x=>!x.controla);
   const ordem = {acabou:0, atencao:1, ok:2};
-  controlados.sort((a,b)=>(ordem[a.estado]-ordem[b.estado]) || a.saldo-b.saldo);
+  const azEst = lembrar("ordemEstoque","situacao")==="az";
+  const porNomeEst = (a,b)=>String(a.p.n||"").localeCompare(String(b.p.n||""),"pt-BR",{numeric:true, sensitivity:"base"});
+  controlados.sort(azEst? porNomeEst : (a,b)=>(ordem[a.estado]-ordem[b.estado]) || a.saldo-b.saldo);
+  soltos.sort(porNomeEst);
   const cartao = (x)=>`<button class="est ${x.estado}" data-estoque="${esc(x.p.id)}">
     <span class="corpo"><span class="nome">${esc(x.p.n)}</span>
       <span class="sub">${x.controla
@@ -4423,6 +4478,8 @@ function telaEstoque(){
       ${C.alertas.map(x=>esc(x.p.n)+" <b>("+(x.saldo>0?x.saldo:"acabou")+")</b>").join(", ")}.</div>`:""}
     ${r.semCusto>0.004? `<p class="nota" style="margin:10px 2px">${fmt(r.semCusto)} em vendas ainda sem custo cadastrado — o lucro não conta essa parte.</p>`:""}
     <div class="card"><h3>📦 Com controle de estoque<span class="sub-h">${controlados.length} itens</span></h3>
+      <div class="chips" style="margin-bottom:10px"><button class="chip" data-acao="est-ordem" data-v="situacao" aria-pressed="${!azEst}">Acabando primeiro</button>
+        <button class="chip" data-acao="est-ordem" data-v="az" aria-pressed="${azEst}">A → Z</button></div>
       ${controlados.length? `<div class="lista">${controlados.map(cartao).join("")}</div>`
         : `<div class="vazio">Nenhum item com estoque lançado.<br>Toque num item abaixo para lançar quanto entrou, o custo e quando avisar.</div>`}
     </div>
@@ -4681,7 +4738,7 @@ function telaAjustes(){
 
     `;
   }
-  if(sec==="acessos") return voltar + secAcessos();
+  if(sec==="acessos") return voltar + secAcessos() + cardSenhaCmd();
   if(sec==="clientes") return voltar + `<div class="card"><h3>Cadastro de clientes</h3>
       <p class="nota">Vale para todos os eventos. Quem já comprou uma vez aparece na hora de abrir o fiado, com o telefone junto — não precisa cadastrar de novo.</p>
       <input class="campo" id="in-pessoas" placeholder="Procurar no cadastro" value="${esc(S.buscaPessoa||"")}" autocomplete="off" style="margin-top:10px">
@@ -6024,7 +6081,7 @@ document.addEventListener("click", async (e)=>{
       const itens = Object.entries(S.carrinho).map(([id,q])=>({id, n:prod(id).n, p:prod(id).p, q, c:prod(id).c}));
       const total = itens.reduce((s,i)=>s+i.p*i.q,0); if(!itens.length) return;
       if(!S.clientes.some(c=>c.slug===cli.slug)){ const pe = S.pessoas.find(x=>x.slug===cli.slug)||{}; salvarCliente({slug:cli.slug, nome:cli.nome, fone:pe.fone||""}); }
-      lancar({tipo:"venda", itens, total, forma:"fiado", cli:cli.slug, cliNome:cli.nome, auto:true});
+      lancar({tipo:"venda", itens, total, forma:"fiado", cli:cli.slug, cliNome:cli.nome, auto:true, quem:cli.quem||""});
       S.carrinho = {}; desenhar();
       if(el.dataset.pagar){ folhaPagar(total, S.evId, cli); return; }
       aviso(`<b>Lançado na sua conta</b>R$ ${fmt(total)} · dá para desfazer por ${DESFAZER_MIN} min`, 3500); return;
@@ -6035,8 +6092,30 @@ document.addEventListener("click", async (e)=>{
       const nm = pe? pe.nome : nome; if(!pe) salvarPessoa({slug:sl, nome:nm, fone:""});
       refAparelho(el.dataset.id).set({cliente:true, cliSlug:sl, cliNome:nm, gerente:false, principal:false, comanda:false, local:""}, {merge:true}).catch(()=>{});
       fechaFolha(); aviso("<b>Agora é cliente</b>conta de "+esc(nm), 4000); return; }
-    if(a==="cmd-cli"){ S.cmdCli = {slug:el.dataset.slug, nome:el.dataset.nome}; S.carrinho = {}; S.cat = "Todos"; desenhar(); try{ window.scrollTo(0,0); }catch(e){} return; }
-    if(a==="cmd-sair"){ S.cmdCli = null; S.carrinho = {}; desenhar(); return; }
+    if(a==="est-ordem"){ guardar("ordemEstoque", el.dataset.v); desenhar(); return; }
+    if(a==="cmd-senha"){
+      if(!(S.cfg&&S.cfg.senhaCmd)){ aviso("<b>Senha não cadastrada</b>Peça ao responsável para cadastrar a senha da comanda em Ajustes", 5000); return; }
+      folha(`<div class="olho">Conta de ${esc((S.cmdCli||{}).nome||"")}</div>
+        <p class="nota" style="margin-top:8px">Para ver o valor e fazer o acerto, digite a senha de liberação.</p>
+        <input class="campo" id="cmd-pin" type="password" inputmode="numeric" autocomplete="off" placeholder="Senha">
+        <div class="btns"><button class="bt bt-ok" data-acao="cmd-senha-ok">Liberar</button><button class="bt bt-quieto" data-fechar>Cancelar</button></div>`);
+      setTimeout(()=>{ try{ $("cmd-pin").focus(); }catch(e){} }, 80); return;
+    }
+    if(a==="cmd-senha-ok"){
+      const v = ($("cmd-pin").value||"").trim();
+      if(!v || hashSenhaCmd(v)!==(S.cfg&&S.cfg.senhaCmd)){ aviso("<b>Senha errada</b>"); $("cmd-pin").value=""; return; }
+      S.cmdLiberado = (S.cmdCli||{}).slug; fechaFolha(); desenhar(); return;
+    }
+    if(a==="cmd-trancar"){ S.cmdLiberado = null; desenhar(); return; }
+    if(a==="cmd-receber"){ if(S.cmdLiberado && S.cmdCli && S.cmdLiberado===S.cmdCli.slug) folhaReceber(S.cmdCli.slug); return; }
+    if(a==="senha-cmd-salvar"){
+      const v = ($("sc-senha").value||"").trim();
+      if(v.length<4){ aviso("<b>Senha curta</b>Use pelo menos 4 números ou letras"); return; }
+      S.cfg = Object.assign({}, S.cfg, {senhaCmd: hashSenhaCmd(v)}); salvarCfg(); desenhar(); aviso("<b>Senha da comanda salva</b>"); return;
+    }
+    if(a==="senha-cmd-tirar"){ S.cfg = Object.assign({}, S.cfg, {senhaCmd:""}); salvarCfg(); desenhar(); aviso("<b>Senha removida</b>"); return; }
+    if(a==="cmd-cli"){ S.cmdLiberado = null; S.cmdCli = {slug:el.dataset.slug, nome:el.dataset.nome}; S.carrinho = {}; S.cat = "Todos"; desenhar(); try{ window.scrollTo(0,0); }catch(e){} return; }
+    if(a==="cmd-sair"){ S.cmdLiberado = null; S.cmdCli = null; S.carrinho = {}; desenhar(); return; }
     if(a==="cmd-novo"){
       const nome = ($("cmd-novo").value||"").trim().replace(/\s+/g," "); if(!nome){ aviso("<b>Digite o nome</b>"); return; }
       const sl = slug(nome); const pe = S.pessoas.find(x=>x.slug===sl);
@@ -6082,7 +6161,7 @@ document.addEventListener("click", async (e)=>{
       const v = parseFloat(String($("pg-valor").value||"").replace(/\./g,"").replace(",","."));
       if(!(v>0)){ aviso("<b>Digite o valor pago</b>"); return; }
       if(!S.db){ aviso("<b>Sem conexão</b>"); return; }
-      gravarNuvem(S.db.collection("avisos").doc("av"+novoId()), {cli:cli.slug, cliNome:cli.nome, ev:evId, evNome:ev.nome||"", valor:v, ts:Date.now(), dev:S.dev, visto:false});
+      gravarNuvem(S.db.collection("avisos").doc("av"+novoId()), {cli:cli.slug, cliNome:cli.nome, quem:cli.quem||(papel()==="cliente"? meuCliente().quem||"" : ""), ev:evId, evNome:ev.nome||"", valor:v, ts:Date.now(), dev:S.dev, visto:false});
       fechaFolha(); if(papel()==="comanda"){ S.cmdCli = null; S.carrinho = {}; } desenhar(); aviso("<b>Aviso enviado</b>Obrigado!", 3500); return;
     }
     if(a==="cli-autoriza"){
@@ -6481,6 +6560,7 @@ async function pegarFone(inp){
   }catch(e){ if(!(e && e.name==="AbortError")) aviso("<b>Não consegui abrir a agenda</b>Digite o número", 3500); }
 }
 function enfeitarFones(){
+  if(!AGENDA) return;
   document.querySelectorAll('input[type="tel"]:not([data-agenda]), input[inputmode="tel"]:not([data-agenda])').forEach(inp=>{
     inp.dataset.agenda = "1";
     const cx = document.createElement("span"); cx.className = "fone-linha";
