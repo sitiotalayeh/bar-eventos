@@ -3784,8 +3784,9 @@ function cardAparelhos(){
           ${sit==="ativo" && souPrincipal() && !a.cliente? `<button class="bt bt-quieto bt-mini" data-ap="fazerdono:${esc(a.id)}">Tornar gerente</button>`:""}
           ${sit==="ativo" && souPrincipal() && !a.cliente? `<button class="bt bt-quieto bt-mini" data-ap="passardono:${esc(a.id)}">Passar dono</button>`:""}
           
-          ${sit==="ativo" && !a.cliente && !a.gerente? `<button class="bt bt-quieto bt-mini" data-ap="cliente:${esc(a.id)}">Tornar cliente</button>`:""}
-          ${sit==="ativo" && !a.cliente? `<button class="bt bt-quieto bt-mini" data-ap="comanda:${esc(a.id)}">${a.comanda? "Voltar a vender" : "Virar comanda fixa"}</button>`:""}
+          ${sit==="ativo" && !a.gerente? `<button class="bt bt-quieto bt-mini" data-ap="cliente:${esc(a.id)}">${a.cliente? "Trocar a conta" : "Tornar cliente"}</button>`:""}
+          ${sit==="ativo" && !a.comanda? `<button class="bt bt-quieto bt-mini" data-ap="comanda:${esc(a.id)}">Virar comanda fixa</button>`:""}
+          ${sit==="ativo" && (a.cliente || a.comanda)? `<button class="bt bt-quieto bt-mini" data-ap="vender:${esc(a.id)}">Voltar a vender</button>`:""}
           <button class="bt bt-quieto bt-mini" data-ap="remover:${esc(a.id)}">Remover</button>`;
       }
       return `<div class="aparelho">
@@ -3824,6 +3825,21 @@ function assinarEvento2(){
   const uL = qL.onSnapshot((snap)=>{
     const novo = {};
     snap.docs.forEach(d=>{ const x=d.data(); novo[d.id] = {ev:x.ev, dev:x.dev, posto:x.posto, n:x.n, itens:x.itens||[]}; });
+    /* o que este aparelho lançou e ainda não chegou na nuvem não some: mantém e reenvia */
+    for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i);
+      if(!k || !k.startsWith(pref)) continue;
+      try{ const b = JSON.parse(localStorage.getItem(k)), id = k.slice(12), c = novo[id];
+        if(!b || b.ev!==S.evId || b.dev!==S.dev) continue;
+        if(!c || (c.itens||[]).length < (b.itens||[]).length){
+          novo[id] = {ev:b.ev, dev:b.dev, posto:b.posto, n:b.n, itens:b.itens||[]};
+          S.reenviadosBloco = S.reenviadosBloco || {};
+          if(!snap.metadata.fromCache && !snap.metadata.hasPendingWrites && (S.reenviadosBloco[id]||0) < 3){
+            S.reenviadosBloco[id] = (S.reenviadosBloco[id]||0) + 1;
+            gravarNuvem(S.db.collection("lanc").doc(id), {ev:b.ev, dev:b.dev, posto:b.posto, n:b.n, itens:b.itens||[], ts:Date.now()});
+          }
+        }
+      }catch(e){}
+    }
     S.blocos = novo; abrirBloco();
     if(!snap.metadata.fromCache && S.nuvem!=="erro") S.nuvem="ok";
     recalcular(); pintarSinal(); desenhar();
@@ -6070,8 +6086,10 @@ document.addEventListener("click", async (e)=>{
         <datalist id="tc-lista">${nomes.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>
         <div class="btns"><button class="bt bt-ok" data-acao="ap-cliente-ok" data-id="${esc(id)}">Tornar cliente</button>
           <button class="bt bt-quieto" data-fechar>Cancelar</button></div>`); return; }
-    if(op==="comanda"){ const liga = !(ap && ap.comanda); refAparelho(id).set({comanda:liga}, {merge:true}).catch(()=>{});
-      aviso("<b>"+nome+"</b>"+(liga? "agora é a comanda fixa do bar" : "volta a vender normalmente")); return; }
+    if(op==="comanda"){ refAparelho(id).set({comanda:true, cliente:false, gerente:false, principal:false, local:""}, {merge:true}).catch(()=>{});
+      aviso("<b>"+nome+"</b>agora é a comanda fixa do bar"); return; }
+    if(op==="vender"){ refAparelho(id).set({comanda:false, cliente:false}, {merge:true}).catch(()=>{});
+      aviso("<b>"+nome+"</b>volta a vender normalmente"); return; }
     if(op==="local"){ refAparelho(id).set({local: (ap && ap.local==="mensal")? "" : "mensal"}, {merge:true}).catch(()=>{});
       aviso("<b>"+nome+"</b>"+((ap && ap.local==="mensal")? "volta a vender no evento" : "passa a vender no bar mensal")); return; }
     if(op==="passardono"){
